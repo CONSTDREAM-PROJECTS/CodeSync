@@ -134,12 +134,6 @@ class CodeGenerator {
       case 'JavaScript':
         code = this.generateJavaScriptCode(standardizedElements, diagramType, patterns);
         break;
-      case 'C++':
-        code = this.generateCppCode(standardizedElements, diagramType, patterns);
-        break;
-      case 'C#':
-        code = this.generateCSharpCode(standardizedElements, diagramType, patterns);
-        break;
       default:
         code = this.generateJavaCode(standardizedElements, diagramType, patterns);
     }
@@ -226,6 +220,162 @@ class CodeGenerator {
   static normalizeIdentifier(name, context = 'class') {
     if (!name) return 'Unnamed';
     return this.optimizeNaming(name, context);
+  }
+
+  static parseParameters(paramString, language) {
+    // Parse parameters like "newEmail: String, count: int" 
+    if (!paramString || paramString.trim() === '') return '';
+    
+    const params = paramString.split(',').map(p => p.trim());
+    
+    if (language === 'Java') {
+      return params.map(param => {
+        const parts = param.split(':').map(p => p.trim());
+        if (parts.length === 2) {
+          return `${parts[1]} ${parts[0]}`;
+        }
+        return param;
+      }).join(', ');
+    } else if (language === 'Python') {
+      return params.map(param => {
+        const parts = param.split(':').map(p => p.trim());
+        return parts[0]; // Python doesn't need type in signature
+      }).join(', ');
+    } else if (language === 'JavaScript') {
+      return params.map(param => {
+        const parts = param.split(':').map(p => p.trim());
+        return parts[0]; // JavaScript doesn't use types
+      }).join(', ');
+    }
+    
+    return paramString;
+  }
+
+  static generateImplementationSuggestion(method, language) {
+    const methodName = method.name.toLowerCase();
+    const params = method.parameters || '';
+    const returnType = method.returnType || 'void';
+    let suggestion = '';
+
+    // Extract parameter names
+    const paramNames = params.split(',').map(p => {
+      const parts = p.split(':').map(x => x.trim());
+      return parts[0];
+    }).filter(Boolean);
+
+    // Smart suggestions based on method name patterns
+    if (methodName.includes('login') || methodName.includes('authenticate')) {
+      suggestion += '        // Validate credentials\n';
+      suggestion += '        // Check username and password against database\n';
+      if (paramNames.length >= 2) {
+        suggestion += `        // Authenticate ${paramNames[0]} with ${paramNames[1]}\n`;
+      }
+      suggestion += '        // Return true if valid, false otherwise\n';
+    } 
+    else if (methodName.includes('update')) {
+      suggestion += '        // Validate input parameters\n';
+      if (paramNames.length > 0) {
+        suggestion += `        // Update with new value: ${paramNames[0]}\n`;
+      }
+      suggestion += '        // Save changes to database\n';
+      suggestion += '        // Return success status\n';
+    }
+    else if (methodName.includes('delete') || methodName.includes('remove')) {
+      suggestion += '        // Check if item exists\n';
+      suggestion += '        // Delete from database\n';
+      suggestion += '        // Return success status\n';
+    }
+    else if (methodName.includes('create') || methodName.includes('add')) {
+      suggestion += '        // Validate input data\n';
+      if (paramNames.length > 0) {
+        suggestion += `        // Create new entity with: ${paramNames.join(', ')}\n`;
+      }
+      suggestion += '        // Save to database\n';
+      suggestion += '        // Return created object or success status\n';
+    }
+    else if (methodName.includes('get') || methodName.includes('find') || methodName.includes('fetch')) {
+      suggestion += '        // Query database\n';
+      if (paramNames.length > 0) {
+        suggestion += `        // Find by: ${paramNames.join(', ')}\n`;
+      }
+      suggestion += '        // Return the requested data\n';
+    }
+    else if (methodName.includes('save')) {
+      suggestion += '        // Validate data\n';
+      suggestion += '        // Persist to database\n';
+      suggestion += '        // Return success status\n';
+    }
+    else if (methodName.includes('calculate') || methodName.includes('compute')) {
+      suggestion += '        // Perform calculation\n';
+      if (paramNames.length > 0) {
+        suggestion += `        // Use parameters: ${paramNames.join(', ')}\n`;
+      }
+      suggestion += '        // Return computed result\n';
+    }
+    else if (methodName.includes('validate') || methodName.includes('check') || methodName.includes('verify')) {
+      suggestion += '        // Validate the input\n';
+      if (paramNames.length > 0) {
+        suggestion += `        // Check ${paramNames.join(', ')} against rules\n`;
+      }
+      suggestion += '        // Return validation result\n';
+    }
+    else if (methodName.includes('send') || methodName.includes('notify')) {
+      suggestion += '        // Prepare message/notification\n';
+      if (paramNames.length > 0) {
+        suggestion += `        // Send to: ${paramNames[0]}\n`;
+      }
+      suggestion += '        // Execute send operation\n';
+      suggestion += '        // Return success status\n';
+    }
+    else if (methodName.includes('reset') || methodName.includes('clear')) {
+      suggestion += '        // Reset/clear the data\n';
+      if (paramNames.length > 0) {
+        suggestion += `        // Set new value: ${paramNames.join(', ')}\n`;
+      }
+      suggestion += '        // Update state\n';
+    }
+    else if (methodName.includes('load') || methodName.includes('initialize') || methodName.includes('init')) {
+      suggestion += '        // Initialize components\n';
+      suggestion += '        // Load necessary data\n';
+      suggestion += '        // Set up initial state\n';
+    }
+    else if (methodName.startsWith('is') || methodName.startsWith('has') || methodName.startsWith('can')) {
+      suggestion += '        // Check condition\n';
+      if (paramNames.length > 0) {
+        suggestion += `        // Evaluate: ${paramNames.join(', ')}\n`;
+      }
+      suggestion += '        // Return boolean result\n';
+    }
+    else {
+      // Generic suggestion
+      suggestion += '        // TODO: Implement method logic\n';
+      if (paramNames.length > 0) {
+        suggestion += `        // Process parameters: ${paramNames.join(', ')}\n`;
+      }
+      if (returnType !== 'void') {
+        suggestion += '        // Return appropriate value\n';
+      }
+    }
+
+    return suggestion;
+  }
+
+  static getDefaultReturnValue(returnType, language) {
+    const type = returnType.toLowerCase();
+    
+    if (type === 'boolean' || type === 'bool') {
+      return 'false';
+    } else if (type === 'int' || type === 'integer' || type === 'long' || type === 'short' || type === 'byte') {
+      return '0';
+    } else if (type === 'double' || type === 'float') {
+      return '0.0';
+    } else if (type === 'char' || type === 'character') {
+      return "'\\0'";
+    } else if (type === 'string') {
+      return '""';
+    } else {
+      return 'null';
+    }
   }
 
   static normalizeType(type) {
@@ -318,8 +468,17 @@ class CodeGenerator {
         if (element.methods && element.methods.length > 0) {
           code += '    // Methods\n';
           element.methods.forEach(method => {
-            code += `    public ${method.returnType || 'void'} ${method.name}() {\n`;
-            code += '        // TODO: Implement method\n';
+            const params = method.parameters ? this.parseParameters(method.parameters, 'Java') : '';
+            code += `    public ${method.returnType || 'void'} ${method.name}(${params}) {\n`;
+            
+            // Smart implementation suggestion
+            const suggestion = this.generateImplementationSuggestion(method, 'Java');
+            code += suggestion;
+            
+            if (method.returnType && method.returnType !== 'void') {
+              const defaultReturn = this.getDefaultReturnValue(method.returnType, 'Java');
+              code += `        return ${defaultReturn};\n`;
+            }
             code += '    }\n\n';
           });
         }
@@ -370,8 +529,14 @@ class CodeGenerator {
         if (element.methods && element.methods.length > 0) {
           code += '\n';
           element.methods.forEach(method => {
-            code += `    def ${method.name}(self):\n`;
-            code += '        """TODO: Implement method"""\n';
+            const params = method.parameters ? this.parseParameters(method.parameters, 'Python') : '';
+            const paramStr = params ? `self, ${params}` : 'self';
+            code += `    def ${method.name}(${paramStr}):\n`;
+            
+            // Smart implementation suggestion
+            const suggestion = this.generateImplementationSuggestion(method, 'Python');
+            code += suggestion.replace(/\/\//g, '#'); // Convert // to # for Python
+            
             code += '        pass\n\n';
           });
         }
@@ -411,8 +576,17 @@ class CodeGenerator {
         // Methods
         if (element.methods && element.methods.length > 0) {
           element.methods.forEach(method => {
-            code += `    ${method.name}() {\n`;
-            code += '        // TODO: Implement method\n';
+            const params = method.parameters ? this.parseParameters(method.parameters, 'JavaScript') : '';
+            code += `    ${method.name}(${params}) {\n`;
+            
+            // Smart implementation suggestion
+            const suggestion = this.generateImplementationSuggestion(method, 'JavaScript');
+            code += suggestion;
+            
+            if (method.returnType && method.returnType !== 'void') {
+              const defaultReturn = this.getDefaultReturnValue(method.returnType, 'JavaScript');
+              code += `        return ${defaultReturn};\n`;
+            }
             code += '    }\n\n';
           });
         }
@@ -433,93 +607,6 @@ class CodeGenerator {
     return code;
   }
 
-  static generateCppCode(elements, diagramType, patterns) {
-    let code = '// Generated C++ Code\n';
-    code += '// Detected Patterns: ' + (patterns.length > 0 ? patterns.map(p => p.pattern).join(', ') : 'None') + '\n\n';
-    code += '#include <iostream>\n';
-    code += '#include <string>\n\n';
-
-    if (diagramType === 'class') {
-      elements.filter(el => el.type === 'class').forEach(element => {
-        code += `class ${element.name} {\n`;
-        code += 'private:\n';
-        
-        // Attributes
-        if (element.attributes && element.attributes.length > 0) {
-          element.attributes.forEach(attr => {
-            code += `    ${attr.type || 'std::string'} ${attr.name};\n`;
-          });
-        }
-
-        code += '\npublic:\n';
-        // Constructor
-        code += `    ${element.name}() {}\n\n`;
-
-        // Methods
-        if (element.methods && element.methods.length > 0) {
-          element.methods.forEach(method => {
-            code += `    ${method.returnType || 'void'} ${method.name}() {\n`;
-            code += '        // TODO: Implement method\n';
-            code += '    }\n\n';
-          });
-        }
-
-        code += '};\n\n';
-      });
-    }
-
-    return code;
-  }
-
-  static generateCSharpCode(elements, diagramType, patterns) {
-    let code = '// Generated C# Code\n';
-    code += '// Detected Patterns: ' + (patterns.length > 0 ? patterns.map(p => p.pattern).join(', ') : 'None') + '\n\n';
-    code += 'using System;\n\n';
-
-    if (diagramType === 'class') {
-      elements.filter(el => el.type === 'class').forEach(element => {
-        code += `public class ${element.name}\n{\n`;
-        
-        // Attributes
-        if (element.attributes && element.attributes.length > 0) {
-          element.attributes.forEach(attr => {
-            code += `    private ${attr.type || 'string'} ${attr.name};\n`;
-          });
-          code += '\n';
-        }
-
-        // Properties
-        if (element.attributes && element.attributes.length > 0) {
-          element.attributes.forEach(attr => {
-            const capitalized = attr.name.charAt(0).toUpperCase() + attr.name.slice(1);
-            code += `    public ${attr.type || 'string'} ${capitalized}\n`;
-            code += '    {\n';
-            code += `        get { return ${attr.name}; }\n`;
-            code += `        set { ${attr.name} = value; }\n`;
-            code += '    }\n\n';
-          });
-        }
-
-        // Constructor
-        code += `    public ${element.name}()\n    {\n`;
-        code += '        // Initialize\n';
-        code += '    }\n\n';
-
-        // Methods
-        if (element.methods && element.methods.length > 0) {
-          element.methods.forEach(method => {
-            code += `    public ${method.returnType || 'void'} ${method.name}()\n    {\n`;
-            code += '        // TODO: Implement method\n';
-            code += '    }\n\n';
-          });
-        }
-
-        code += '}\n\n';
-      });
-    }
-
-    return code;
-  }
 }
 
 export default CodeGenerator;
