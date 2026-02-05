@@ -115,7 +115,7 @@ class CodeGenerator {
   }
 
   // Algorithm 4: Model-to-Text (M2T) Code Generation
-  static generateCode(elements, language = 'Java', diagramType = 'class') {
+  static generateCode(elements, connections = [], language = 'Java', diagramType = 'class') {
     // First standardize the model (M2M)
     const standardizedElements = this.standardizeModel(elements);
     
@@ -126,22 +126,98 @@ class CodeGenerator {
     
     switch (language) {
       case 'Java':
-        code = this.generateJavaCode(standardizedElements, diagramType, patterns);
+        code = this.generateJavaCode(standardizedElements, connections, diagramType, patterns);
         break;
       case 'Python':
-        code = this.generatePythonCode(standardizedElements, diagramType, patterns);
+        code = this.generatePythonCode(standardizedElements, connections, diagramType, patterns);
         break;
       case 'JavaScript':
-        code = this.generateJavaScriptCode(standardizedElements, diagramType, patterns);
+        code = this.generateJavaScriptCode(standardizedElements, connections, diagramType, patterns);
         break;
       default:
-        code = this.generateJavaCode(standardizedElements, diagramType, patterns);
+        code = this.generateJavaCode(standardizedElements, connections, diagramType, patterns);
     }
 
     // Apply optimization
     code = this.optimizeCode(code, language);
     
     return code;
+  }
+
+  // Algorithm 6: Relationship-based Code Generation
+  static generateRelationshipImports(connections, elements, language) {
+    const imports = new Set();
+
+    connections.forEach(connection => {
+      const sourceElement = elements.find(el => el.id === connection.sourceId);
+      const targetElement = elements.find(el => el.id === connection.targetId);
+
+      if (!sourceElement || !targetElement) return;
+
+      switch (connection.type) {
+        case 'composition':
+        case 'aggregation':
+          // Add imports for collection types if needed
+          if (language === 'Java') {
+            if (connection.multiplicity?.includes('*') || connection.multiplicity?.includes('0..*')) {
+              imports.add('import java.util.List;');
+              imports.add('import java.util.ArrayList;');
+            }
+          }
+          break;
+        case 'association':
+          // Add imports for related classes
+          if (language === 'Java' && connection.multiplicity?.includes('*')) {
+            imports.add('import java.util.List;');
+            imports.add('import java.util.ArrayList;');
+          }
+          break;
+      }
+    });
+
+    return Array.from(imports).join('\n');
+  }
+
+  static generateRelationshipAttributes(element, connections, elements, language) {
+    let attributes = '';
+
+    // Find all relationships where this element is the target
+    const incomingRelationships = connections.filter(conn => conn.targetId === element.id);
+
+    incomingRelationships.forEach(connection => {
+      const sourceElement = elements.find(el => el.id === connection.sourceId);
+      if (!sourceElement) return;
+
+      const sourceName = sourceElement.name;
+      const multiplicity = connection.multiplicity || '1';
+      const isMultiple = multiplicity.includes('*') || multiplicity.includes('0..*') || multiplicity.includes('1..*');
+
+      switch (connection.type) {
+        case 'composition':
+          if (isMultiple) {
+            attributes += `    private List<${sourceName}> ${sourceName.toLowerCase()}s = new ArrayList<>();\n`;
+          } else {
+            attributes += `    private ${sourceName} ${sourceName.toLowerCase()};\n`;
+          }
+          break;
+        case 'aggregation':
+          if (isMultiple) {
+            attributes += `    private List<${sourceName}> ${sourceName.toLowerCase()}s = new ArrayList<>();\n`;
+          } else {
+            attributes += `    private ${sourceName} ${sourceName.toLowerCase()};\n`;
+          }
+          break;
+        case 'association':
+          if (isMultiple) {
+            attributes += `    private List<${sourceName}> ${sourceName.toLowerCase()}s = new ArrayList<>();\n`;
+          } else {
+            attributes += `    private ${sourceName} ${sourceName.toLowerCase()};\n`;
+          }
+          break;
+      }
+    });
+
+    return attributes;
   }
 
   // Algorithm 5: Code Optimization
@@ -428,19 +504,57 @@ class CodeGenerator {
   }
 
   // Language-specific code generators
-  static generateJavaCode(elements, diagramType, patterns) {
+  static generateJavaCode(elements, connections = [], diagramType, patterns) {
     let code = '// Generated Java Code\n';
     code += '// Detected Patterns: ' + (patterns.length > 0 ? patterns.map(p => p.pattern).join(', ') : 'None') + '\n\n';
 
+    // Process relationships for imports and dependencies
+    const relationshipImports = this.generateRelationshipImports(connections, elements, 'Java');
+    if (relationshipImports) {
+      code += relationshipImports + '\n';
+    }
+
     if (diagramType === 'class') {
       elements.filter(el => el.type === 'class').forEach(element => {
-        code += `public class ${element.name} {\n`;
+        // Check for inheritance
+        const inheritance = connections.find(conn =>
+          conn.type === 'inheritance' && conn.targetId === element.id
+        );
+        const parentClass = inheritance ? elements.find(el => el.id === inheritance.sourceId)?.name : null;
+
+        // Check for interfaces
+        const interfaces = connections
+          .filter(conn => conn.type === 'implementation' && conn.targetId === element.id)
+          .map(conn => elements.find(el => el.id === conn.sourceId)?.name)
+          .filter(name => name);
+
+        // Generate class declaration with inheritance/interfaces
+        let classDeclaration = 'public ';
+        if (element.type === 'abstract') {
+          classDeclaration += 'abstract ';
+        }
+        classDeclaration += `class ${element.name}`;
+        if (parentClass) {
+          classDeclaration += ` extends ${parentClass}`;
+        }
+        if (interfaces.length > 0) {
+          classDeclaration += ` implements ${interfaces.join(', ')}`;
+        }
+        code += `${classDeclaration} {\n`;
         
-        // Attributes
+        // Attributes from relationships
+        const relationshipAttributes = this.generateRelationshipAttributes(element, connections, elements, 'Java');
+        if (relationshipAttributes) {
+          code += '\n    // Relationship Attributes\n';
+          code += relationshipAttributes;
+        }
+
+        // Regular Attributes
         if (element.attributes && element.attributes.length > 0) {
           code += '\n    // Attributes\n';
           element.attributes.forEach(attr => {
-            code += `    private ${attr.type || 'String'} ${attr.name};\n`;
+            const modifier = attr.isStatic ? 'static ' : '';
+            code += `    private ${modifier}${attr.type || 'String'} ${attr.name};\n`;
           });
         }
 
@@ -468,18 +582,25 @@ class CodeGenerator {
         if (element.methods && element.methods.length > 0) {
           code += '    // Methods\n';
           element.methods.forEach(method => {
+            const modifier = method.isAbstract ? 'abstract ' : method.isStatic ? 'static ' : '';
             const params = method.parameters ? this.parseParameters(method.parameters, 'Java') : '';
-            code += `    public ${method.returnType || 'void'} ${method.name}(${params}) {\n`;
-            
-            // Smart implementation suggestion
-            const suggestion = this.generateImplementationSuggestion(method, 'Java');
-            code += suggestion;
-            
-            if (method.returnType && method.returnType !== 'void') {
-              const defaultReturn = this.getDefaultReturnValue(method.returnType, 'Java');
-              code += `        return ${defaultReturn};\n`;
+            code += `    public ${modifier}${method.returnType || 'void'} ${method.name}(${params})`;
+
+            if (method.isAbstract) {
+              code += ';\n\n';
+            } else {
+              code += ' {\n';
+
+              // Smart implementation suggestion
+              const suggestion = this.generateImplementationSuggestion(method, 'Java');
+              code += suggestion;
+
+              if (method.returnType && method.returnType !== 'void') {
+                const defaultReturn = this.getDefaultReturnValue(method.returnType, 'Java');
+                code += `        return ${defaultReturn};\n`;
+              }
+              code += '    }\n\n';
             }
-            code += '    }\n\n';
           });
         }
 
@@ -506,7 +627,7 @@ class CodeGenerator {
     return code;
   }
 
-  static generatePythonCode(elements, diagramType, patterns) {
+  static generatePythonCode(elements, connections = [], diagramType, patterns) {
     let code = '# Generated Python Code\n';
     code += '# Detected Patterns: ' + (patterns.length > 0 ? patterns.map(p => p.pattern).join(', ') : 'None') + '\n\n';
 
@@ -556,7 +677,7 @@ class CodeGenerator {
     return code;
   }
 
-  static generateJavaScriptCode(elements, diagramType, patterns) {
+  static generateJavaScriptCode(elements, connections = [], diagramType, patterns) {
     let code = '// Generated JavaScript Code\n';
     code += '// Detected Patterns: ' + (patterns.length > 0 ? patterns.map(p => p.pattern).join(', ') : 'None') + '\n\n';
 
