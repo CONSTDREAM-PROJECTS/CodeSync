@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import UMLEditor from './components/UMLEditor';
-import { Menu, FileCode, Github, Book } from 'lucide-react';
+import { Menu, Github, Book } from 'lucide-react';
 import './App.css';
 
 function App() {
@@ -72,7 +72,7 @@ function App() {
           </a>
           <span>•</span>
           <a href="#" className="hover:text-white transition-colors flex items-center space-x-1">
-            <FileCode size={14} />
+            <span className="text-sm">&lt;/&gt;</span>
             <span>API Docs</span>
           </a>
         </div>
