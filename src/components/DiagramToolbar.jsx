@@ -19,20 +19,20 @@ const DiagramToolbar = ({
   canRedo
 }) => {
   return (
-    <div className="bg-[#2d2d30] border-b border-[#3e3e42] p-3 flex items-center justify-between">
+    <div className="p-3 flex items-center justify-between" style={{ background: 'var(--panel-2)', borderBottom: '1px solid rgba(255,255,255,0.03)' }}>
       <div className="flex items-center space-x-2">
         {/* Language Selector */}
         <select
           value={language}
           onChange={(e) => setLanguage(e.target.value)}
-          className="bg-[#3c3c3c] text-white px-3 py-1.5 rounded border border-[#3e3e42] text-sm focus:outline-none focus:border-[#007acc]"
+          className="bg-[#3c3c3c] text-white px-3 py-1.5 rounded border border-[#3e3e42] text-sm focus:outline-none"
         >
           <option>Java</option>
           <option>Python</option>
           <option>JavaScript</option>
         </select>
 
-        <div className="w-px h-6 bg-[#3e3e42]"></div>
+        <div className="w-px h-6" style={{ background: 'var(--panel)' }}></div>
 
         {/* File Operations */}
         <button
@@ -86,7 +86,8 @@ const DiagramToolbar = ({
         </button>
         <button
           onClick={onToggleGrid}
-          className={`p-2 rounded transition-colors ${showGrid ? 'bg-[#007acc]' : 'hover:bg-[#3e3e42]'}`}
+          className={`p-2 rounded transition-colors ${showGrid ? 'btn-primary' : 'hover:bg-[#3e3e42]'}`}
+          style={showGrid ? { color: '#222' } : {}}
           title="Toggle Grid"
         >
           <Grid size={18} />
@@ -95,7 +96,7 @@ const DiagramToolbar = ({
 
       <button
         onClick={onGenerateCode}
-        className="bg-[#007acc] hover:bg-[#005a9e] px-4 py-1.5 rounded flex items-center space-x-2 transition-colors"
+        className="btn-primary px-4 py-1.5 rounded flex items-center space-x-2 transition-colors"
       >
         <Code size={18} />
         <span className="text-sm font-medium">Generate Code</span>
