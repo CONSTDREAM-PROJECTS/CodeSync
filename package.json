@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "private": true,
   "description": "UML to Code Generator with all 14 diagram types and 6 transformation algorithms",
-  "author": "Const Dream",
+  "author": "CodeSync",
   "license": "MIT",
   "dependencies": {
     "react": "^18.2.0",

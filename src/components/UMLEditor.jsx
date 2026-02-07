@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import CodeGenerator from '../services/codeGenerator';
+import CodeToUMLConverter from '../services/codeToUMLConverter';
 import { useHistory } from '../hooks/useHistory';
 import { useCanvasInteractions } from '../hooks/useCanvasInteractions';
 import { diagramTypes, getToolbarItems } from '../utils/diagramUtils';
@@ -7,6 +8,7 @@ import DiagramSidebar from './DiagramSidebar';
 import DiagramToolbar from './DiagramToolbar';
 import ToolPalette from './ToolPalette';
 import PropertiesPanel from './PropertiesPanel';
+import CodeImportModal from './CodeImportModal';
 
 const UMLEditor = () => {
   // State Management
@@ -18,6 +20,8 @@ const UMLEditor = () => {
   const [selectedConnection, setSelectedConnection] = useState(null);
   const [selectedTool, setSelectedTool] = useState('select');
   const [generatedCode, setGeneratedCode] = useState('');
+  const [generatedFiles, setGeneratedFiles] = useState([]);
+  const [selectedFileIndex, setSelectedFileIndex] = useState(0);
   const [showCodePanel, setShowCodePanel] = useState(false);
   const [connectionStart, setConnectionStart] = useState(null);
   const [clipboard, setClipboard] = useState(null);
@@ -25,6 +29,7 @@ const UMLEditor = () => {
   const [resizeHandle, setResizeHandle] = useState(null);
   const [resizeStartPos, setResizeStartPos] = useState({ x: 0, y: 0 });
   const [originalElement, setOriginalElement] = useState(null);
+  const [showCodeImportModal, setShowCodeImportModal] = useState(false);
 
   // Custom hooks
   const { saveToHistory, undo, redo, resetHistory, canUndo, canRedo } = useHistory();
@@ -220,7 +225,10 @@ const UMLEditor = () => {
       attributes: (type === 'class' || type === 'abstract') ? [] : undefined,
       methods: (type === 'class' || type === 'interface' || type === 'abstract') ? [] : undefined,
       properties: {},
-      stereotype: ''
+      stereotype: '',
+      className: type === 'object' ? '' : undefined,
+      state: type === 'object' ? '' : undefined,
+      attributeValues: type === 'object' ? {} : undefined
     };
     const newElements = [...elements, newElement];
     setElements(newElements);
@@ -428,9 +436,48 @@ const UMLEditor = () => {
 
   // Generate code
   const handleGenerateCode = () => {
-    const code = CodeGenerator.generateCode(elements, connections, language, selectedDiagram);
-    setGeneratedCode(code);
+    // Use new file splitting feature for accurate code generation
+    const files = CodeGenerator.splitIntoFiles(elements, connections, language, selectedDiagram);
+    setGeneratedFiles(files);
+    
+    // Keep backward compatibility by setting generatedCode to first file
+    if (files.length > 0) {
+      setGeneratedCode(files[0].content);
+      setSelectedFileIndex(0);
+    }
     setShowCodePanel(true);
+  };
+
+  // Code to UML conversion
+  const handleCodeToUML = () => {
+    setShowCodeImportModal(true);
+  };
+
+  const handleImportCode = (importedElements, importedConnections) => {
+    // Merge or replace the diagram
+    if (elements.length === 0 && connections.length === 0) {
+      // If empty diagram, just replace
+      setElements(importedElements);
+      setConnections(importedConnections);
+    } else {
+      // If diagram exists, offset the new elements to avoid overlap
+      const maxX = Math.max(...elements.map(e => e.x + e.width), 0);
+      const offsetElements = importedElements.map(el => ({
+        ...el,
+        x: el.x + maxX + 100 // Add offset to avoid overlap
+      }));
+      setElements([...elements, ...offsetElements]);
+      setConnections([...connections, ...importedConnections]);
+    }
+    
+    // Save to history
+    saveToHistory(
+      [...elements, ...importedElements],
+      [...connections, ...importedConnections]
+    );
+    
+    // Show success message
+    alert(`Successfully imported ${importedElements.length} classes from code!`);
   };
 
   // Export/Import functions
@@ -505,6 +552,7 @@ const UMLEditor = () => {
           onImport={handleImport}
           onExport={handleExport}
           onGenerateCode={handleGenerateCode}
+          onCodeToUML={handleCodeToUML}
           zoom={zoom}
           onZoomIn={handleZoomIn}
           onZoomOut={handleZoomOut}
@@ -996,6 +1044,83 @@ const UMLEditor = () => {
                     </>
                   )}
 
+                  {/* Object Element */}
+                  {element.type === 'object' && (
+                    <>
+                      <rect
+                        x={element.x}
+                        y={element.y}
+                        width={element.width}
+                        height={element.height}
+                        fill="#2d2d30"
+                        stroke={selectedElements.some(el => el.id === element.id) ? '#007acc' : '#3e3e42'}
+                        strokeWidth={selectedElements.some(el => el.id === element.id) ? 2 : 1}
+                        rx="4"
+                      />
+                      {/* Object name with underline */}
+                      <line
+                        x1={element.x}
+                        y1={element.y + 30}
+                        x2={element.x + element.width}
+                        y2={element.y + 30}
+                        stroke="#3e3e42"
+                      />
+                      <text
+                        x={element.x + element.width / 2}
+                        y={element.y + 20}
+                        fill="white"
+                        fontSize="13"
+                        fontWeight="bold"
+                        textAnchor="middle"
+                      >
+                        {element.name}{element.className ? ` : ${element.className}` : ''}
+                      </text>
+
+                      {/* State line separator */}
+                      {element.state && (
+                        <>
+                          <line
+                            x1={element.x}
+                            y1={element.y + 45}
+                            x2={element.x + element.width}
+                            y2={element.y + 45}
+                            stroke="#3e3e42"
+                          />
+                          <text
+                            x={element.x + 10}
+                            y={element.y + 40}
+                            fill="#a8d8ff"
+                            fontSize="11"
+                            fontStyle="italic"
+                          >
+                            state = {element.state}
+                          </text>
+                        </>
+                      )}
+
+                      {/* Attribute Values */}
+                      {element.attributeValues && Object.keys(element.attributeValues).length > 0 && (
+                        <>
+                          {Object.entries(element.attributeValues).map(([key, value], idx) => {
+                            const baseY = element.y + (element.state ? 55 : 40) + (idx * 18);
+                            return (
+                              <text
+                                key={`attr-val-${idx}`}
+                                x={element.x + 10}
+                                y={baseY}
+                                fill="#cccccc"
+                                fontSize="11"
+                                fontFamily="monospace"
+                              >
+                                {key} = {value}
+                              </text>
+                            );
+                          })}
+                        </>
+                      )}
+                    </>
+                  )}
+
                   {/* Component Element */}
                   {element.type === 'component' && (
                     <>
@@ -1198,7 +1323,18 @@ const UMLEditor = () => {
         setSelectedConnection={setSelectedConnection}
         saveToHistory={() => saveToHistory(elements, connections)}
         generatedCode={generatedCode}
+        generatedFiles={generatedFiles}
+        selectedFileIndex={selectedFileIndex}
+        setSelectedFileIndex={setSelectedFileIndex}
       />
+
+      {/* Code Import Modal */}
+      {showCodeImportModal && (
+        <CodeImportModal
+          onImport={handleImportCode}
+          onClose={() => setShowCodeImportModal(false)}
+        />
+      )}
     </div>
   );
 };

@@ -1,3 +1,96 @@
 .App {
   min-height: 100vh;
 }
+
+:root{
+  --bg-0: #1f1f1f; /* page background */
+  --panel: #3e3e3e; /* side panels */
+  --panel-2: #2f2f2f; /* darker panels */
+  --muted: #d9dccc; /* pale input background */
+  --accent: #9c9b7f; /* login button/tan */
+  --accent-2: #a8d8ff; /* small highlight */
+  --text: #e6e6e6;
+}
+
+body, .App {
+  background: var(--bg-0);
+  color: var(--text);
+}
+
+.top-nav{
+  background: linear-gradient(180deg, var(--panel-2), var(--panel));
+  border-bottom: 1px solid rgba(255,255,255,0.03);
+  padding-top: 12px;
+  padding-bottom: 12px;
+  height: 64px;
+}
+
+.btn-primary{
+  background: var(--accent);
+  color: #222;
+  padding-left: 1rem;
+  padding-right: 1rem;
+  border-radius: 999px;
+  padding-top: 0.4rem;
+  padding-bottom: 0.4rem;
+}
+
+.btn-primary:hover{ filter: brightness(0.95); }
+
+.btn-muted{
+  background: #404040;
+  color: var(--muted);
+  padding-left: 0.75rem;
+  padding-right: 0.75rem;
+  border-radius: 8px;
+}
+
+/* Modal styles */
+.modal-overlay{
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 9999;
+}
+.login-card{
+  width: 420px;
+  background: linear-gradient(180deg, #3f3f3f, #343434);
+  border-radius: 28px;
+  padding: 44px 36px;
+  box-shadow: 0 20px 60px rgba(0,0,0,0.6);
+  text-align: center;
+}
+.login-logo{
+  font-size: 28px;
+  color: var(--muted);
+  font-weight: 600;
+  margin-bottom: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.login-logo img{ height: 64px; width: auto; margin: 0 auto 8px auto; display:block; }
+.login-form{ display:flex; flex-direction:column; gap:14px; align-items:center; }
+.login-input{
+  width: 320px;
+  height: 46px;
+  border-radius: 22px;
+  background: var(--muted);
+  border: none;
+  padding: 0 18px;
+  outline: none;
+}
+.login-help{ color: rgba(255,255,255,0.6); font-size:14px; margin-top:6px; }
+.login-btn{ background: var(--accent); color:#222; border-radius:18px; padding:8px 36px; margin-top:6px; }
+.login-or{ display:flex; align-items:center; gap:12px; color:rgba(255,255,255,0.6); font-size:14px; margin-top:8px; width:100%; }
+.login-or span{ flex:1; height:1px; background:rgba(255,255,255,0.06); }
+.login-socials{ display:flex; gap:18px; margin-top:8px; }
+.social-btn{ width:44px; height:44px; border-radius:22px; background:rgba(255,255,255,0.03); display:flex; align-items:center; justify-content:center; }
+.create-account{ color:rgba(255,255,255,0.7); margin-top:10px; }
+
+/* Minor adjustments for editor and panels */
+main{ background: transparent; }
+.h-screen{ background: var(--bg-0); }

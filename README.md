@@ -4,36 +4,59 @@ CodeSynch: A Model-Driven Engineering Framework for Automated UML-to-Web Code Ge
 =======
 # CodeSynch - UML to Code Generator
 
-**A Model-Driven Engineering Framework for Automated UML-to-Web Code Generation**
+A Model-Driven Engineering Framework for Automated UML-to-Web Code Generation.
 
 ## Thesis Project
-- **Group:** const dream
+
+- **Group:** CodeSync
 - **Program:** BS Computer Science (Software Engineering)
 - **Members:** Christer Vhon Peregrin, Ronin Bernardo, Andrea Ysabelle Rogon, Stephan Bernal
 - **Academic Year:** 2025-2026
 
-## Features
-- ✅ Visual UML Class Diagram Editor
-- ✅ Multi-language Code Generation (TypeScript, JavaScript, Python, PHP)
-- ✅ Model-Driven Engineering Principles
-- ✅ Template-based Code Generation
-- ✅ Export Generated Code
+## Summary
 
-## How to Run
+CodeSynch is a small web app for visually editing UML class diagrams and generating web-oriented source code (JavaScript, Python, Java) from the diagram model. It includes a diagram editor UI, hooks for canvas interactions and history, services for mapping types and generating code, and utilities to help manage diagram state.
 
-### Install Dependencies
+**This README** contains quick start instructions and a guided explanation of the project source so you can run, extend, or contribute to the tool.
+
+## Requirements
+
+- Node.js (recommended v16 or v18)
+- npm (comes with Node.js)
+
+On Windows you can verify your environment with:
+
+```powershell
+node --version
+npm --version
+```
+
+## Install
+
+1. From the project root run:
+
 ```bash
 npm install
 ```
 
-### Start Development Server
+2. Start the development server:
+
 ```bash
 npm start
 ```
 
-Open [http://localhost:3000](http://localhost:3000) in your browser.
+3. Open http://localhost:3000 in your browser.
 
-### Build for Production
+## Scripts
+
+- `npm start` — start dev server (create-react-app dev server)
+- `npm run build` — build production bundle into `build/`
+- `npm test` — run tests (uses the test runner configured in the project)
+
+## Build / Production
+
+To create an optimized production build:
+
 ```bash
 npm run build
 ```
@@ -42,4 +65,3 @@ npm run build
 1. Click "Add Class" to create a UML class
 2. Define attributes with visibility modifiers (+, -, #)
 3. Add methods with parameters
->>>>>>> 9c5d9bb (Initial commit)

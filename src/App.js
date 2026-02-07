@@ -1,29 +1,24 @@
 import React, { useState } from 'react';
 import UMLEditor from './components/UMLEditor';
 import { Menu, Github, Book } from 'lucide-react';
+import LoginModal from './components/LoginModal';
 import './App.css';
 
 function App() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [showLogin, setShowLogin] = useState(false);
 
   return (
     <div className="h-screen flex flex-col bg-[#1e1e1e]">
       {/* Top Navigation Bar */}
-      <nav className="bg-[#2d2d30] border-b border-[#3e3e42] px-4 py-2 flex items-center justify-between">
-        <div className="flex items-center space-x-4">
-          {/* Logo */}
-          <div className="flex items-center space-x-2">
-            <img 
-              src="/codesynch.jpg" 
-              alt="CodeSync Logo" 
-              className="h-8 w-8"
-              onError={(e) => {
-                e.target.style.display = 'none';
-              }}
-            />
-            <span className="text-white font-bold text-xl">CodeSync</span>
-          </div>
-          
+      <nav className="top-nav px-4 flex items-center justify-between">
+        <div className="flex items-center">
+          <img
+            src="/const_dream_logo.png"
+            alt="CodeSync Logo"
+            className="hidden md:block h-10 mr-4"
+            onError={(e) => { e.target.style.display = 'none'; }}
+          />
           <div className="hidden md:flex items-center space-x-1">
             <button className="px-3 py-1.5 text-sm text-gray-300 hover:text-white hover:bg-[#3e3e42] rounded transition-colors">
               About Us
@@ -35,16 +30,16 @@ function App() {
         </div>
 
         <div className="flex items-center space-x-3">
-          <button className="hidden md:flex items-center space-x-2 px-4 py-1.5 bg-[#3c3c3c] text-white rounded hover:bg-[#4e4e4e] transition-colors">
+          <button className="hidden md:flex items-center space-x-2 px-4 py-1.5 btn-muted">
             <Book size={16} />
             <span className="text-sm">Documentation</span>
           </button>
-          
-          <button className="px-4 py-1.5 bg-[#007acc] text-white rounded hover:bg-[#005a9e] transition-colors text-sm font-medium">
+
+          <button onClick={() => setShowLogin(true)} className="px-4 py-1.5 btn-primary text-sm font-medium">
             Login
           </button>
-          
-          <button 
+
+          <button
             className="md:hidden p-2 text-gray-300 hover:text-white"
             onClick={() => setSidebarOpen(!sidebarOpen)}
           >
@@ -94,6 +89,8 @@ function App() {
           </div>
         </div>
       )}
+
+        {showLogin && <LoginModal onClose={() => setShowLogin(false)} />}
     </div>
   );
 }

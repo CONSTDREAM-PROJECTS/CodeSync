@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { Trash2 } from 'lucide-react';
 
 const PropertiesPanel = ({
@@ -13,8 +13,21 @@ const PropertiesPanel = ({
   setConnections,
   setSelectedConnection,
   saveToHistory,
-  generatedCode
+  generatedCode,
+  generatedFiles = [],
+  selectedFileIndex = 0,
+  setSelectedFileIndex = () => {}
 }) => {
+  const [currentCode, setCurrentCode] = useState(generatedCode);
+
+  // Update displayed code when file index changes or generatedFiles changes
+  useEffect(() => {
+    if (generatedFiles.length > 0 && selectedFileIndex < generatedFiles.length) {
+      setCurrentCode(generatedFiles[selectedFileIndex].content);
+    } else if (generatedCode) {
+      setCurrentCode(generatedCode);
+    }
+  }, [selectedFileIndex, generatedFiles, generatedCode]);
   const updateElement = (elementId, updates) => {
     const updated = elements.map(el =>
       el.id === elementId ? { ...el, ...updates } : el
@@ -121,10 +134,10 @@ const PropertiesPanel = ({
           <div className="h-full flex flex-col p-4">
             <div className="flex justify-between items-center mb-3">
               <h3 className="text-sm font-semibold text-gray-400">GENERATED CODE</h3>
-              {generatedCode && (
+              {currentCode && (
                 <button
                   onClick={() => {
-                    navigator.clipboard.writeText(generatedCode);
+                    navigator.clipboard.writeText(currentCode);
                     alert('Code copied to clipboard!');
                   }}
                   className="text-xs text-[#007acc] hover:text-[#005a9e] transition-colors"
@@ -133,9 +146,29 @@ const PropertiesPanel = ({
                 </button>
               )}
             </div>
-            {generatedCode ? (
+
+            {/* File Tabs - Show when multiple files are generated */}
+            {generatedFiles.length > 1 && (
+              <div className="mb-3 flex gap-2 overflow-x-auto border-b border-[#3e3e42] pb-2">
+                {generatedFiles.map((file, index) => (
+                  <button
+                    key={index}
+                    onClick={() => setSelectedFileIndex(index)}
+                    className={`px-3 py-1 text-xs rounded transition-colors whitespace-nowrap ${
+                      selectedFileIndex === index
+                        ? 'bg-[#007acc] text-white'
+                        : 'bg-[#3e3e42] text-gray-300 hover:bg-[#4a4a4f]'
+                    }`}
+                  >
+                    {file.filename}
+                  </button>
+                ))}
+              </div>
+            )}
+
+            {currentCode ? (
               <pre className="flex-1 bg-[#1e1e1e] p-3 rounded text-xs overflow-auto font-mono">
-                <code className="text-green-400">{generatedCode}</code>
+                <code className="text-green-400">{currentCode}</code>
               </pre>
             ) : (
               <div className="flex-1 flex items-center justify-center">
@@ -152,6 +185,11 @@ const PropertiesPanel = ({
 };
 
 const ElementProperties = ({ element, onUpdate, onDelete, saveToHistory }) => {
+  // Minimal set of common types
+  const commonTypes = ['String', 'int', 'double', 'boolean', 'void', 'Object', 'List'];
+
+  const returnTypes = ['void', 'String', 'int', 'double', 'boolean', 'Object', 'List'];
+
   const updateAttribute = (index, updates) => {
     const newAttrs = [...(element.attributes || [])];
     newAttrs[index] = { ...newAttrs[index], ...updates };
@@ -225,30 +263,122 @@ const ElementProperties = ({ element, onUpdate, onDelete, saveToHistory }) => {
         </div>
       )}
 
-      <div className="grid grid-cols-2 gap-2">
-        <div>
-          <label className="text-xs text-gray-500 block mb-1">Width</label>
-          <input
-            type="number"
-            value={element.width}
-            onChange={(e) => onUpdate(element.id, { width: Math.max(50, parseInt(e.target.value) || 100) })}
-            onBlur={saveToHistory}
-            className="w-full bg-[#3c3c3c] text-white px-3 py-1.5 rounded border border-[#3e3e42] text-sm focus:outline-none focus:border-[#007acc]"
-          />
+      {element.type === 'object' && (
+        <div className="space-y-3">
+          <div>
+            <label className="text-xs text-gray-500 block mb-1">Class Name</label>
+            <input
+              type="text"
+              value={element.className || ''}
+              onChange={(e) => onUpdate(element.id, { className: e.target.value })}
+              onBlur={saveToHistory}
+              placeholder="Class this object is an instance of"
+              className="w-full bg-[#3c3c3c] text-white px-3 py-1.5 rounded border border-[#3e3e42] text-sm focus:outline-none focus:border-[#007acc]"
+            />
+          </div>
+
+          <div>
+            <label className="text-xs text-gray-500 block mb-1">Object State</label>
+            <input
+              type="text"
+              value={element.state || ''}
+              onChange={(e) => onUpdate(element.id, { state: e.target.value })}
+              onBlur={saveToHistory}
+              placeholder="e.g., active, pending, completed"
+              className="w-full bg-[#3c3c3c] text-white px-3 py-1.5 rounded border border-[#3e3e42] text-sm focus:outline-none focus:border-[#007acc]"
+            />
+          </div>
+
+          <div>
+            <label className="text-xs text-gray-500 block mb-2">Attribute Values</label>
+            <div className="space-y-2 max-h-40 overflow-y-auto">
+              {element.attributeValues && Object.keys(element.attributeValues).length > 0 ? (
+                Object.entries(element.attributeValues).map(([key, value], idx) => (
+                  <div key={idx} className="flex gap-2 items-center">
+                    <input
+                      type="text"
+                      value={key}
+                      onChange={(e) => {
+                        const newValues = { ...element.attributeValues };
+                        delete newValues[key];
+                        newValues[e.target.value] = value;
+                        onUpdate(element.id, { attributeValues: newValues });
+                        saveToHistory();
+                      }}
+                      onBlur={saveToHistory}
+                      placeholder="attribute"
+                      className="flex-1 bg-[#3c3c3c] text-white px-2 py-1 rounded border border-[#3e3e42] text-xs focus:outline-none focus:border-[#007acc]"
+                    />
+                    <span className="text-xs text-gray-500">=</span>
+                    <input
+                      type="text"
+                      value={value}
+                      onChange={(e) => {
+                        const newValues = { ...element.attributeValues };
+                        newValues[key] = e.target.value;
+                        onUpdate(element.id, { attributeValues: newValues });
+                      }}
+                      onBlur={saveToHistory}
+                      placeholder="value"
+                      className="flex-1 bg-[#3c3c3c] text-white px-2 py-1 rounded border border-[#3e3e42] text-xs focus:outline-none focus:border-[#007acc]"
+                    />
+                    <button
+                      onClick={() => {
+                        const newValues = { ...element.attributeValues };
+                        delete newValues[key];
+                        onUpdate(element.id, { attributeValues: newValues });
+                        saveToHistory();
+                      }}
+                      className="px-2 py-1 bg-red-600 hover:bg-red-700 rounded text-xs"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                ))
+              ) : (
+                <p className="text-xs text-gray-500 italic">No attribute values yet</p>
+              )}
+            </div>
+            <button
+              onClick={() => {
+                const newValues = element.attributeValues || {};
+                const keyCount = Object.keys(newValues).length + 1;
+                newValues[`attribute${keyCount}`] = '';
+                onUpdate(element.id, { attributeValues: newValues });
+                saveToHistory();
+              }}
+              className="w-full bg-[#007acc] hover:bg-[#005a9e] px-3 py-1.5 rounded text-sm transition-colors mt-2"
+            >
+              + Add Attribute Value
+            </button>
+          </div>
         </div>
-        <div>
-          <label className="text-xs text-gray-500 block mb-1">Height</label>
-          <input
-            type="number"
-            value={element.height}
-            onChange={(e) => onUpdate(element.id, { height: Math.max(50, parseInt(e.target.value) || 100) })}
-            onBlur={saveToHistory}
-            className="w-full bg-[#3c3c3c] text-white px-3 py-1.5 rounded border border-[#3e3e42] text-sm focus:outline-none focus:border-[#007acc]"
-          />
-        </div>
-      </div>
+      )}
 
       {(element.type === 'class' || element.type === 'interface' || element.type === 'abstract') && (
+        <>
+          <div className="grid grid-cols-2 gap-2">
+            <div>
+              <label className="text-xs text-gray-500 block mb-1">Width</label>
+              <input
+                type="number"
+                value={element.width}
+                onChange={(e) => onUpdate(element.id, { width: Math.max(50, parseInt(e.target.value) || 100) })}
+                onBlur={saveToHistory}
+                className="w-full bg-[#3c3c3c] text-white px-3 py-1.5 rounded border border-[#3e3e42] text-sm focus:outline-none focus:border-[#007acc]"
+              />
+            </div>
+            <div>
+              <label className="text-xs text-gray-500 block mb-1">Height</label>
+              <input
+                type="number"
+                value={element.height}
+                onChange={(e) => onUpdate(element.id, { height: Math.max(50, parseInt(e.target.value) || 100) })}
+                onBlur={saveToHistory}
+                className="w-full bg-[#3c3c3c] text-white px-3 py-1.5 rounded border border-[#3e3e42] text-sm focus:outline-none focus:border-[#007acc]"
+              />
+            </div>
+          </div>
         <div className="space-y-3">
           {(element.type === 'class' || element.type === 'abstract') && (
             <div>
@@ -273,13 +403,33 @@ const ElementProperties = ({ element, onUpdate, onDelete, saveToHistory }) => {
                       placeholder="name"
                       className="flex-1 bg-[#3c3c3c] text-white px-2 py-1 rounded border border-[#3e3e42] text-xs focus:outline-none focus:border-[#007acc]"
                     />
-                    <input
-                      type="text"
-                      value={attr.type || 'String'}
-                      onChange={(e) => updateAttribute(index, { type: e.target.value })}
-                      placeholder="type"
-                      className="w-20 bg-[#3c3c3c] text-white px-2 py-1 rounded border border-[#3e3e42] text-xs focus:outline-none focus:border-[#007acc]"
-                    />
+                    <select
+                      value={commonTypes.includes(attr.type) ? attr.type : 'custom'}
+                      onChange={(e) => {
+                        if (e.target.value === 'custom') {
+                          updateAttribute(index, { type: '' });
+                        } else {
+                          updateAttribute(index, { type: e.target.value });
+                          saveToHistory();
+                        }
+                      }}
+                      className="w-24 bg-[#3c3c3c] text-white px-2 py-1 rounded border border-[#3e3e42] text-xs focus:outline-none focus:border-[#007acc]"
+                    >
+                      {commonTypes.map(type => (
+                        <option key={type} value={type}>{type}</option>
+                      ))}
+                      <option value="custom">Custom...</option>
+                    </select>
+                    {!commonTypes.includes(attr.type) && (
+                      <input
+                        type="text"
+                        value={attr.type || ''}
+                        onChange={(e) => updateAttribute(index, { type: e.target.value })}
+                        onBlur={saveToHistory}
+                        placeholder="custom type"
+                        className="w-20 bg-[#3c3c3c] text-white px-2 py-1 rounded border border-[#007acc] text-xs focus:outline-none"
+                      />
+                    )}
                     <label className="flex items-center gap-1 text-xs text-gray-400">
                       <input
                         type="checkbox"
@@ -330,13 +480,33 @@ const ElementProperties = ({ element, onUpdate, onDelete, saveToHistory }) => {
                       placeholder="method name"
                       className="flex-1 bg-[#3c3c3c] text-white px-2 py-1 rounded border border-[#3e3e42] text-xs focus:outline-none focus:border-[#007acc]"
                     />
-                    <input
-                      type="text"
-                      value={method.returnType || 'void'}
-                      onChange={(e) => updateMethod(index, { returnType: e.target.value })}
-                      placeholder="return"
-                      className="w-16 bg-[#3c3c3c] text-white px-2 py-1 rounded border border-[#3e3e42] text-xs focus:outline-none focus:border-[#007acc]"
-                    />
+                    <select
+                      value={returnTypes.includes(method.returnType) ? method.returnType : 'custom'}
+                      onChange={(e) => {
+                        if (e.target.value === 'custom') {
+                          updateMethod(index, { returnType: '' });
+                        } else {
+                          updateMethod(index, { returnType: e.target.value });
+                          saveToHistory();
+                        }
+                      }}
+                      className="w-20 bg-[#3c3c3c] text-white px-2 py-1 rounded border border-[#3e3e42] text-xs focus:outline-none focus:border-[#007acc]"
+                    >
+                      {returnTypes.map(type => (
+                        <option key={type} value={type}>{type}</option>
+                      ))}
+                      <option value="custom">Custom...</option>
+                    </select>
+                    {!returnTypes.includes(method.returnType) && (
+                      <input
+                        type="text"
+                        value={method.returnType || ''}
+                        onChange={(e) => updateMethod(index, { returnType: e.target.value })}
+                        onBlur={saveToHistory}
+                        placeholder="custom"
+                        className="w-16 bg-[#3c3c3c] text-white px-2 py-1 rounded border border-[#007acc] text-xs focus:outline-none"
+                      />
+                    )}
                     <button
                       onClick={() => removeMethod(index)}
                       className="px-2 py-1 bg-red-600 hover:bg-red-700 rounded text-xs"
@@ -382,6 +552,7 @@ const ElementProperties = ({ element, onUpdate, onDelete, saveToHistory }) => {
             </button>
           </div>
         </div>
+        </>
       )}
 
       <button
