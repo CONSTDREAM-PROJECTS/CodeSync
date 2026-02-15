@@ -8,6 +8,31 @@ const CodeImportModal = ({ onImport, onClose }) => {
   const [conversionResult, setConversionResult] = useState(null);
   const [isConverting, setIsConverting] = useState(false);
 
+  const handleFileUpload = (event) => {
+    const file = event.target.files[0];
+    if (!file) return;
+
+    // Auto-detect language from file extension
+    const fileName = file.name.toLowerCase();
+    if (fileName.endsWith('.java')) {
+      setLanguage('Java');
+    } else if (fileName.endsWith('.py')) {
+      setLanguage('Python');
+    } else if (fileName.endsWith('.js') || fileName.endsWith('.jsx')) {
+      setLanguage('JavaScript');
+    } else if (fileName.endsWith('.puml') || fileName.endsWith('.plantuml')) {
+      setLanguage('PlantUML');
+    }
+
+    // Read file content
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      setSourceCode(e.target.result);
+      setConversionResult(null); // Reset previous results
+    };
+    reader.readAsText(file);
+  };
+
   const handleConvert = async () => {
     if (!sourceCode.trim()) {
       setConversionResult({
@@ -19,7 +44,7 @@ const CodeImportModal = ({ onImport, onClose }) => {
 
     setIsConverting(true);
     
-    // Call 3-Algorithm pipeline
+    // Call Rule-Based Model Transformation
     const result = CodeToUMLConverter.convertCodeToUML(sourceCode, language);
     setConversionResult(result);
     
@@ -45,7 +70,7 @@ const CodeImportModal = ({ onImport, onClose }) => {
             <span>Code to UML Conversion</span>
           </h2>
           <p className="text-sm text-gray-400 mt-1">
-            Paste source code to automatically generate UML class diagrams (3-Algorithm Pipeline)
+            Paste source code to automatically generate UML class diagrams using Rule-Based Model Transformation
           </p>
         </div>
 
@@ -66,6 +91,42 @@ const CodeImportModal = ({ onImport, onClose }) => {
               <option value="JavaScript">JavaScript</option>
               <option value="PlantUML">PlantUML</option>
             </select>
+          </div>
+
+          {/* File Upload Section */}
+          <div>
+            <label className="text-sm font-semibold text-gray-300 block mb-2">
+              Upload Code File (Optional)
+            </label>
+            <div className="flex items-center space-x-3">
+              <label className="flex-1 cursor-pointer">
+                <div className="bg-[#3c3c3c] hover:bg-[#4a4a4f] text-white px-4 py-2 rounded border border-[#3e3e42] transition-colors text-center">
+                  📁 Choose File (.java, .py, .js, .puml)
+                </div>
+                <input
+                  type="file"
+                  accept=".java,.py,.js,.jsx,.ts,.tsx,.puml,.plantuml"
+                  onChange={handleFileUpload}
+                  className="hidden"
+                  disabled={isConverting}
+                />
+              </label>
+              {sourceCode && (
+                <button
+                  onClick={() => {
+                    setSourceCode('');
+                    setConversionResult(null);
+                  }}
+                  className="px-4 py-2 bg-[#4a4a4f] hover:bg-[#5a5a5f] text-white rounded transition-colors"
+                  title="Clear"
+                >
+                  🗑️ Clear
+                </button>
+              )}
+            </div>
+            <p className="text-xs text-gray-400 mt-1">
+              Upload a file or paste code below
+            </p>
           </div>
 
           {/* Code Input */}
@@ -130,23 +191,6 @@ const CodeImportModal = ({ onImport, onClose }) => {
                       <div className="bg-black bg-opacity-30 px-2 py-1 rounded">
                         <span className="text-gray-300">Relationships: </span>
                         <span className="font-mono">{conversionResult.metadata.relationships}</span>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Design Patterns Found */}
-                  {conversionResult.patterns?.length > 0 && (
-                    <div className="text-sm mt-3 border-t border-current border-opacity-30 pt-2">
-                      <p className="font-semibold text-yellow-300 mb-1">Design Patterns Detected:</p>
-                      <div className="space-y-1">
-                        {conversionResult.patterns.map((p, idx) => (
-                          <div key={idx} className="bg-black bg-opacity-30 px-2 py-1 rounded text-xs">
-                            <span className="font-mono text-cyan-300">{p.type}</span>
-                            <span className="text-gray-400"> in </span>
-                            <span className="font-mono">{p.class || p.classes?.join(', ')}</span>
-                            <span className="text-gray-500 ml-1">({Math.round(p.confidence * 100)}%)</span>
-                          </div>
-                        ))}
                       </div>
                     </div>
                   )}

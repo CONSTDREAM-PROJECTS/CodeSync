@@ -17,21 +17,28 @@ const DiagramToolbar = ({
   onUndo,
   onRedo,
   canUndo,
-  canRedo
+  canRedo,
+  selectedDiagram = 'class'
 }) => {
+  // Determine if current diagram supports code import/export
+  const supportsCodeImport = selectedDiagram === 'class';
+  const supportsCodeGeneration = true; // All diagrams can generate some form of code/documentation
+  
   return (
     <div className="p-3 flex items-center justify-between" style={{ background: 'var(--panel-2)', borderBottom: '1px solid rgba(255,255,255,0.03)' }}>
       <div className="flex items-center space-x-2">
-        {/* Language Selector */}
-        <select
-          value={language}
-          onChange={(e) => setLanguage(e.target.value)}
-          className="bg-[#3c3c3c] text-white px-3 py-1.5 rounded border border-[#3e3e42] text-sm focus:outline-none"
-        >
-          <option>Java</option>
-          <option>Python</option>
-          <option>JavaScript</option>
-        </select>
+        {/* Language Selector - only show for diagrams that support code generation */}
+        {supportsCodeGeneration && (
+          <select
+            value={language}
+            onChange={(e) => setLanguage(e.target.value)}
+            className="bg-[#3c3c3c] text-white px-3 py-1.5 rounded border border-[#3e3e42] text-sm focus:outline-none"
+          >
+            <option>Java</option>
+            <option>Python</option>
+            <option>JavaScript</option>
+          </select>
+        )}
 
         <div className="w-px h-6" style={{ background: 'var(--panel)' }}></div>
 
@@ -96,21 +103,37 @@ const DiagramToolbar = ({
       </div>
 
       <div className="flex items-center space-x-2">
-        <button
-          onClick={onCodeToUML}
-          className="btn-primary px-4 py-1.5 rounded flex items-center space-x-2 transition-colors"
-          title="Import code and convert to UML diagram"
-        >
-          <FileCode size={18} />
-          <span>Code to Diagram</span>
-        </button>
-        <button
-          onClick={onGenerateCode}
-          className="btn-primary px-4 py-1.5 rounded flex items-center space-x-2 transition-colors"
-        >
-          <Code size={18} />
-          <span className="text-sm font-medium">Generate Code</span>
-        </button>
+        {/* Code to Diagram - Only for Class Diagram */}
+        {supportsCodeImport && (
+          <button
+            onClick={onCodeToUML}
+            className="btn-primary px-4 py-1.5 rounded flex items-center space-x-2 transition-colors"
+            title="Import code and convert to UML diagram"
+          >
+            <FileCode size={18} />
+            <span>Code to Diagram</span>
+          </button>
+        )}
+        
+        {/* Generate Code/Documentation - All diagrams */}
+        {supportsCodeGeneration && (
+          <button
+            onClick={onGenerateCode}
+            className="btn-primary px-4 py-1.5 rounded flex items-center space-x-2 transition-colors"
+            title={
+              selectedDiagram === 'class' 
+                ? 'Generate source code from diagram' 
+                : selectedDiagram === 'usecase'
+                ? 'Generate use case documentation and tests'
+                : 'Generate sequence flow documentation and code'
+            }
+          >
+            <Code size={18} />
+            <span className="text-sm font-medium">
+              {selectedDiagram === 'class' ? 'Generate Code' : 'Generate Documentation'}
+            </span>
+          </button>
+        )}
       </div>
     </div>
   );

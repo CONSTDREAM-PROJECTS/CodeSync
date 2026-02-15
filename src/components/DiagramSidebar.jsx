@@ -42,6 +42,21 @@ const DiagramSidebar = ({ diagramTypes, selectedDiagram, onDiagramSelect }) => {
           </button>
         ))}
       </div>
+
+      {/* Algorithm Information */}
+      <div className="p-4 mt-6 border-t border-[#3e3e42]">
+        <h3 className="text-xs font-semibold text-gray-500 mb-2">ALGORITHMS</h3>
+        <div className="text-xs text-gray-400 space-y-2">
+          <div className="bg-[#1e1e1e] p-2 rounded">
+            <div className="font-semibold text-blue-400 mb-1">Rule-Based Model Transformation</div>
+            <div>Converts source code to UML using predefined transformation rules</div>
+          </div>
+          <div className="bg-[#1e1e1e] p-2 rounded">
+            <div className="font-semibold text-green-400 mb-1">Bidirectional Model-Code Sync</div>
+            <div>Keeps UML diagrams and code synchronized in both directions</div>
+          </div>
+        </div>
+      </div>
     </div>
   );
 };

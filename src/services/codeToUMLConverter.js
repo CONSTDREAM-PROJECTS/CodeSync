@@ -1,58 +1,49 @@
 // Code-to-UML Converter Service
-// Implements 3-Algorithm Pipeline:
-// Algorithm A: AST Parser - Extract classes, methods, attributes
-// Algorithm B: Relationship Detector - Find inheritance, composition, dependencies
-// Algorithm C: Pattern Detector - Recognize design patterns
+// Implements Rule-Based Model Transformation Algorithm
+// Converts source code to UML diagrams using predefined transformation rules
 
 class CodeToUMLConverter {
   /**
    * Main entry point: Convert source code to UML diagram model
-   * Pipeline: AST Parse → Relationship Detection → Pattern Detection → Convert to CodeSync format
+   * Uses Rule-Based Model Transformation Algorithm
    */
   static convertCodeToUML(sourceCode, language = 'Java') {
     try {
-      // Step 1: Parse code using Algorithm A (AST Parser)
-      const ast = this.parseSourceCode(sourceCode, language);
+      // Step 1: Parse code and extract structural elements
+      const parsedModel = this.parseSourceCode(sourceCode, language);
       
-      if (!ast || (!ast.classes || ast.classes.length === 0)) {
+      if (!parsedModel || (!parsedModel.classes || parsedModel.classes.length === 0)) {
         return {
           success: false,
           message: `Could not parse ${language} code. Ensure syntax is valid.`,
           elements: [],
           connections: [],
-          patterns: []
         };
       }
 
-      // Enhance AST with IDs for linking
-      ast.classes = ast.classes.map((cls, idx) => ({
+      // Enhance model with IDs for linking
+      parsedModel.classes = parsedModel.classes.map((cls, idx) => ({
         ...cls,
         id: `class_${Date.now()}_${idx}`
       }));
 
-      // Step 2: Detect relationships using Algorithm B
-      const relationships = this.detectRelationships(ast.classes, sourceCode, language);
-      
-      // Step 3: Detect design patterns using Algorithm C
-      const patterns = this.detectPatterns(ast.classes, sourceCode);
+      // Step 2: Apply transformation rules to detect relationships
+      const relationships = this.applyTransformationRules(parsedModel.classes, sourceCode);
 
-      // Step 4: Convert to CodeSync UML model
-      const { elements, connections } = this.convertToUMLModel(ast.classes, relationships);
+      // Step 3: Convert to UML model format
+      const { elements, connections } = this.transformToUMLModel(parsedModel.classes, relationships);
 
       return {
         success: true,
-        message: `Successfully converted ${ast.classes.length} classes to UML`,
+        message: `Successfully converted ${parsedModel.classes.length} classes to UML`,
         elements,
         connections,
-        patterns,
-        ast,
         metadata: {
           sourceLanguage: language,
-          totalClasses: ast.classes.length,
-          totalMethods: ast.classes.reduce((sum, cls) => sum + (cls.methods?.length || 0), 0),
-          totalAttributes: ast.classes.reduce((sum, cls) => sum + (cls.attributes?.length || 0), 0),
+          totalClasses: parsedModel.classes.length,
+          totalMethods: parsedModel.classes.reduce((sum, cls) => sum + (cls.methods?.length || 0), 0),
+          totalAttributes: parsedModel.classes.reduce((sum, cls) => sum + (cls.attributes?.length || 0), 0),
           relationships: relationships.length,
-          patternsDetected: patterns.length
         }
       };
     } catch (error) {
@@ -62,38 +53,37 @@ class CodeToUMLConverter {
         error: error.toString(),
         elements: [],
         connections: [],
-        patterns: []
       };
     }
   }
 
   // ============================================================
-  // ALGORITHM A: AST PARSER - Extract structural elements from source code
+  // SOURCE CODE PARSING - Extract structural elements
   // ============================================================
 
   static parseSourceCode(sourceCode, language) {
     // Auto-detect if it's PlantUML format
     if (sourceCode.includes('classDiagram') || sourceCode.includes('class ') && sourceCode.includes('{')) {
-      return this.parsePlantUMLAST(sourceCode);
+      return this.parsePlantUML(sourceCode);
     }
 
     switch(language.toLowerCase()) {
       case 'java':
-        return this.parseJavaAST(sourceCode);
+        return this.parseJava(sourceCode);
       case 'python':
-        return this.parsePythonAST(sourceCode);
+        return this.parsePython(sourceCode);
       case 'javascript':
       case 'js':
-        return this.parseJavaScriptAST(sourceCode);
+        return this.parseJavaScript(sourceCode);
       case 'plantuml':
-        return this.parsePlantUMLAST(sourceCode);
+        return this.parsePlantUML(sourceCode);
       default:
-        return this.parseJavaAST(sourceCode);
+        return this.parseJava(sourceCode);
     }
   }
 
-  static parseJavaAST(sourceCode) {
-    const ast = {
+  static parseJava(sourceCode) {
+    const model = {
       classes: [],
       interfaces: [],
       imports: []
@@ -103,7 +93,7 @@ class CodeToUMLConverter {
     const importRegex = /import\s+(.*?);/g;
     let match;
     while ((match = importRegex.exec(sourceCode)) !== null) {
-      ast.imports.push(match[1]);
+      model.imports.push(match[1]);
     }
 
     // Extract classes with modifiers and inheritance
@@ -122,10 +112,10 @@ class CodeToUMLConverter {
         isFinal: /\bfinal\s+class\b/.test(match[0])
       };
       
-      ast.classes.push(classNode);
+      model.classes.push(classNode);
     }
 
-    return ast;
+    return model;
   }
 
   static extractJavaAttributes(classBody) {
@@ -177,8 +167,8 @@ class CodeToUMLConverter {
     return methods;
   }
 
-  static parsePythonAST(sourceCode) {
-    const ast = {
+  static parsePython(sourceCode) {
+    const model = {
       classes: [],
       imports: []
     };
@@ -187,29 +177,49 @@ class CodeToUMLConverter {
     const importRegex = /^(?:from\s+[\w.]+\s+)?import\s+([\w,\s*]+)/gm;
     let match;
     while ((match = importRegex.exec(sourceCode)) !== null) {
-      ast.imports.push(match[1]);
+      model.imports.push(match[1]);
     }
 
-    // Extract classes
-    const classRegex = /^class\s+(\w+)(?:\(([^)]*)\))?\s*:\n((?:(?:    |\t).*\n?)*)/gm;
+    // Use simple, reliable regex approach
+    // Find all class definitions
+    const classRegex = /class\s+(\w+)(?:\(([^)]*)\))?\s*:/g;
+    const classMatches = [];
     
     while ((match = classRegex.exec(sourceCode)) !== null) {
-      const [, className, parentClasses, classBody] = match;
+      classMatches.push({
+        index: match.index,
+        fullMatch: match[0],
+        className: match[1],
+        parentClasses: match[2] || null
+      });
+    }
+    
+    // Extract body for each class
+    for (let i = 0; i < classMatches.length; i++) {
+      const currentClass = classMatches[i];
+      const nextClass = classMatches[i + 1];
+      
+      // Get class body - from end of class declaration to start of next class (or end of file)
+      const startIndex = currentClass.index + currentClass.fullMatch.length;
+      const endIndex = nextClass ? nextClass.index : sourceCode.length;
+      const classBody = sourceCode.substring(startIndex, endIndex);
       
       const classNode = {
-        name: className,
-        extends: parentClasses ? parentClasses.split(',')[0].trim() : null,
+        name: currentClass.className,
+        extends: currentClass.parentClasses ? currentClass.parentClasses.split(',')[0].trim() : null,
         implements: [],
         attributes: this.extractPythonAttributes(classBody),
         methods: this.extractPythonMethods(classBody),
-        isAbstract: sourceCode.includes('from abc import') && /class\s+\w+\(ABC\)/.test(match[0])
+        isAbstract: sourceCode.includes('from abc import') && currentClass.parentClasses?.includes('ABC')
       };
       
-      ast.classes.push(classNode);
+      model.classes.push(classNode);
     }
 
-    return ast;
+    return model;
   }
+
+
 
   static extractPythonAttributes(classBody) {
     const attributes = [];
@@ -243,21 +253,14 @@ class CodeToUMLConverter {
     while ((match = methodRegex.exec(classBody)) !== null) {
       const [, methodName, params, returnType] = match;
       
-      if (methodName !== '__init__' && !seen.has(methodName)) {
+      if (!seen.has(methodName) && methodName !== '__init__') {
         seen.add(methodName);
-        
-        const paramList = params
-          .split(',')
-          .filter(p => p.trim() !== 'self')
-          .map(p => p.trim())
-          .join(', ');
-        
         methods.push({
           name: methodName,
           returnType: returnType || 'None',
           visibility: methodName.startsWith('_') ? 'private' : 'public',
-          parameters: paramList,
-          isStatic: methodName === '__new__'
+          parameters: params.replace(/self,?\s*/, ''),
+          isStatic: false
         });
       }
     }
@@ -266,30 +269,24 @@ class CodeToUMLConverter {
   }
 
   static inferPythonType(value) {
-    if (/\[\]|\{\}/.test(value)) return 'list';
-    if (/^\d+$/.test(value)) return 'int';
-    if (/^\d+\.\d+$/.test(value)) return 'float';
-    if (/^['"]/.test(value)) return 'str';
-    if (/^(True|False)$/.test(value)) return 'bool';
+    if (value.includes('"') || value.includes("'")) return 'str';
+    if (/^\d+$/.test(value.trim())) return 'int';
+    if (/^\d+\.\d+$/.test(value.trim())) return 'float';
+    if (value.includes('True') || value.includes('False')) return 'bool';
+    if (value.includes('[')) return 'list';
+    if (value.includes('{')) return 'dict';
     return 'object';
   }
 
-  static parseJavaScriptAST(sourceCode) {
-    const ast = {
-      classes: [],
-      imports: []
+  static parseJavaScript(sourceCode) {
+    const model = {
+      classes: []
     };
 
-    // Extract ES6 imports
-    const importRegex = /import\s+(?:\{([^}]+)\}|(\w+))\s+from\s+['"]([^'"]+)['"]/g;
-    let match;
-    while ((match = importRegex.exec(sourceCode)) !== null) {
-      ast.imports.push(match[3]);
-    }
-
-    // Extract classes
-    const classRegex = /class\s+(\w+)(?:\s+extends\s+(\w+))?\s*\{([\s\S]*?)\n\}/g;
+    // Extract ES6 classes
+    const classRegex = /class\s+(\w+)(?:\s+extends\s+(\w+))?\s*\{([\s\S]*?)(?=\n\})/g;
     
+    let match;
     while ((match = classRegex.exec(sourceCode)) !== null) {
       const [, className, extendsClass, classBody] = match;
       
@@ -297,32 +294,32 @@ class CodeToUMLConverter {
         name: className,
         extends: extendsClass || null,
         implements: [],
-        attributes: this.extractJSAttributes(classBody),
-        methods: this.extractJSMethods(classBody),
+        attributes: this.extractJavaScriptAttributes(classBody),
+        methods: this.extractJavaScriptMethods(classBody),
         isAbstract: false
       };
       
-      ast.classes.push(classNode);
+      model.classes.push(classNode);
     }
 
-    return ast;
+    return model;
   }
 
-  static extractJSAttributes(classBody) {
+  static extractJavaScriptAttributes(classBody) {
     const attributes = [];
-    const attrRegex = /(?:this\.)?(\w+)\s*=\s*[^;]+;?/g;
+    const attrRegex = /this\.(\w+)\s*=\s*([^;]+)/g;
     
     let match;
     const seen = new Set();
     while ((match = attrRegex.exec(classBody)) !== null) {
-      const [, name] = match;
+      const [, name, value] = match;
       
       if (!seen.has(name)) {
         seen.add(name);
         attributes.push({
           name,
           type: 'any',
-          visibility: name.startsWith('#') ? 'private' : 'public',
+          visibility: 'public',
           isStatic: false
         });
       }
@@ -331,24 +328,23 @@ class CodeToUMLConverter {
     return attributes;
   }
 
-  static extractJSMethods(classBody) {
+  static extractJavaScriptMethods(classBody) {
     const methods = [];
-    const methodRegex = /(?:async\s+)?(\w+)\s*\(([^)]*)\)\s*(?::\s*(\w+))?\s*\{/g;
+    const methodRegex = /(?:async\s+)?(\w+)\s*\(([^)]*)\)\s*\{/g;
     
     let match;
     const seen = new Set();
     while ((match = methodRegex.exec(classBody)) !== null) {
-      const [, methodName, params, returnType] = match;
+      const [, methodName, params] = match;
       
-      if (methodName !== 'constructor' && !seen.has(methodName)) {
+      if (!seen.has(methodName) && methodName !== 'constructor') {
         seen.add(methodName);
-        
         methods.push({
           name: methodName,
-          returnType: returnType || 'any',
-          visibility: methodName.startsWith('_') ? 'private' : 'public',
+          returnType: 'any',
+          visibility: 'public',
           parameters: params,
-          isStatic: /\bstatic\s+\w+\s*\(/.test(match[0])
+          isStatic: false
         });
       }
     }
@@ -356,61 +352,52 @@ class CodeToUMLConverter {
     return methods;
   }
 
-  // ============================================================
-  // PlantUML Parser - Parse PlantUML class diagram syntax
-  // ============================================================
-
-  static parsePlantUMLAST(sourceCode) {
-    const ast = {
-      classes: [],
-      imports: []
+  static parsePlantUML(sourceCode) {
+    const model = {
+      classes: []
     };
 
-    // Remove classDiagram keyword and extra whitespace
-    const cleanCode = sourceCode.replace(/classDiagram\s*/i, '').trim();
-
-    // Extract classes: class ClassName { ... }
-    const classRegex = /class\s+(\w+)\s*(\{[^}]*\})?/g;
+    // Extract classes from PlantUML format
+    const classRegex = /class\s+(\w+)\s*\{([\s\S]*?)(?=\n\})/g;
+    
     let match;
-
-    while ((match = classRegex.exec(cleanCode)) !== null) {
+    while ((match = classRegex.exec(sourceCode)) !== null) {
       const [, className, classBody] = match;
-
+      
       const classNode = {
         name: className,
         extends: null,
         implements: [],
-        attributes: this.extractPlantUMLAttributes(classBody || ''),
-        methods: this.extractPlantUMLMethods(classBody || ''),
+        attributes: this.extractPlantUMLAttributes(classBody),
+        methods: this.extractPlantUMLMethods(classBody),
         isAbstract: false
       };
-
-      ast.classes.push(classNode);
+      
+      model.classes.push(classNode);
     }
 
-    // Extract relationships and inheritance
-    this.extractPlantUMLRelationships(cleanCode, ast.classes);
+    // Extract relationships
+    this.extractPlantUMLRelationships(sourceCode, model.classes);
 
-    return ast;
+    return model;
   }
 
   static extractPlantUMLAttributes(classBody) {
     const attributes = [];
     if (!classBody) return attributes;
 
-    // Match lines like: +String name, -int age, #List books
-    const attrRegex = /([+\-#])(\w+)\s+(\w+)/g;
+    const attrRegex = /([+\-#])\s*([\w]+)\s*:\s*(\w+)/g;
     let match;
     const seen = new Set();
 
     while ((match = attrRegex.exec(classBody)) !== null) {
-      const [, visibility, type, name] = match;
-      
+      const [, visibility, name, type] = match;
+
       if (!seen.has(name)) {
         seen.add(name);
         attributes.push({
           name,
-          type,
+          type: type || 'Object',
           visibility: visibility === '+' ? 'public' : visibility === '-' ? 'private' : 'protected',
           isStatic: false
         });
@@ -424,7 +411,6 @@ class CodeToUMLConverter {
     const methods = [];
     if (!classBody) return methods;
 
-    // Match lines like: +addBook(Book book), -checkout(), #getName(): String
     const methodRegex = /([+\-#])\s*([\w]+)\s*\(([^)]*)\)\s*(?::\s*(\w+))?/g;
     let match;
     const seen = new Set();
@@ -434,8 +420,6 @@ class CodeToUMLConverter {
 
       if (!seen.has(methodName)) {
         seen.add(methodName);
-        
-        // Skip attributes (properties without parentheses)
         methods.push({
           name: methodName,
           returnType: returnType || 'void',
@@ -450,9 +434,6 @@ class CodeToUMLConverter {
   }
 
   static extractPlantUMLRelationships(sourceCode, classes) {
-    // Extract relationships like: Library "1" --* "many" Book : contains
-    // Patterns: --> (inheritance), <|-- (realization), --* (aggregation), -- (association)
-    
     const relationshipRegex = /(\w+)\s+([<|]*-+[>|*]?)\s+(\w+)\s*:\s*(\w+)?/g;
     let match;
 
@@ -460,7 +441,6 @@ class CodeToUMLConverter {
       const [, source, arrow, target, label] = match;
       
       if (arrow.includes('|')) {
-        // Inheritance or realization
         const sourceClass = classes.find(c => c.name === source);
         if (sourceClass) {
           if (arrow.includes('<')) {
@@ -474,14 +454,15 @@ class CodeToUMLConverter {
   }
 
   // ============================================================
-  // ALGORITHM B: RELATIONSHIP DETECTOR - Detect inheritance, composition, dependencies
+  // RULE-BASED MODEL TRANSFORMATION - Apply transformation rules
   // ============================================================
 
-  static detectRelationships(classes, sourceCode, language) {
+  static applyTransformationRules(classes, sourceCode) {
     const relationships = [];
 
     classes.forEach((sourceClass) => {
-      // 1. INHERITANCE (extends)
+      // Rule 1: Inheritance Relationship
+      // If class extends another class, create inheritance relationship
       if (sourceClass.extends) {
         const targetClass = classes.find(c => c.name === sourceClass.extends);
         if (targetClass) {
@@ -494,7 +475,8 @@ class CodeToUMLConverter {
         }
       }
 
-      // 2. IMPLEMENTATION (implements)
+      // Rule 2: Realization Relationship
+      // If class implements interface(s), create realization relationship
       if (sourceClass.implements?.length > 0) {
         sourceClass.implements.forEach(iface => {
           const targetClass = classes.find(c => c.name === iface);
@@ -509,30 +491,54 @@ class CodeToUMLConverter {
         });
       }
 
-      // 3. COMPOSITION/AGGREGATION (attributes showing other classes)
+      // Rule 3: Composition Relationship
+      // If attribute type matches another class (non-collection), create composition
       if (sourceClass.attributes?.length > 0) {
         sourceClass.attributes.forEach(attr => {
           const matchedClass = classes.find(c => 
             c.name === attr.type || 
-            attr.type.includes(c.name) ||
-            attr.type.includes(`<${c.name}>`)
+            attr.type.includes(c.name)
           );
 
           if (matchedClass) {
             const isCollection = /list|array|set|collection|vector/i.test(attr.type);
             
+            if (!isCollection) {
+              relationships.push({
+                sourceId: sourceClass.id,
+                targetId: matchedClass.id,
+                type: 'composition',
+                label: attr.name || '',
+                multiplicity: '1'
+              });
+            }
+          }
+        });
+      }
+
+      // Rule 4: Aggregation Relationship
+      // If attribute is a collection of another class, create aggregation
+      if (sourceClass.attributes?.length > 0) {
+        sourceClass.attributes.forEach(attr => {
+          const matchedClass = classes.find(c => 
+            attr.type.includes(`<${c.name}>`) ||
+            (attr.type.includes(c.name) && /list|array|set|collection|vector/i.test(attr.type))
+          );
+
+          if (matchedClass) {
             relationships.push({
               sourceId: sourceClass.id,
               targetId: matchedClass.id,
-              type: isCollection ? 'aggregation' : 'composition',
+              type: 'aggregation',
               label: attr.name || '',
-              multiplicity: isCollection ? '0..*' : '1'
+              multiplicity: '0..*'
             });
           }
         });
       }
 
-      // 4. DEPENDENCY (method parameters using other classes)
+      // Rule 5: Dependency Relationship
+      // If method parameter uses another class, create dependency
       if (sourceClass.methods?.length > 0) {
         sourceClass.methods.forEach(method => {
           const paramRegex = /(\w+)/g;
@@ -556,77 +562,42 @@ class CodeToUMLConverter {
           }
         });
       }
+
+      // Rule 6: Association Relationship
+      // If return type of method is another class, create association
+      if (sourceClass.methods?.length > 0) {
+        sourceClass.methods.forEach(method => {
+          const matchedClass = classes.find(c => 
+            c.name === method.returnType
+          );
+
+          if (matchedClass && matchedClass.id !== sourceClass.id) {
+            const alreadyExists = relationships.some(r => 
+              r.sourceId === sourceClass.id && 
+              r.targetId === matchedClass.id
+            );
+
+            if (!alreadyExists) {
+              relationships.push({
+                sourceId: sourceClass.id,
+                targetId: matchedClass.id,
+                type: 'association',
+                label: method.name || ''
+              });
+            }
+          }
+        });
+      }
     });
 
     return relationships;
   }
 
   // ============================================================
-  // ALGORITHM C: PATTERN DETECTOR - Recognize design patterns
+  // MODEL TRANSFORMATION - Convert to UML format
   // ============================================================
 
-  static detectPatterns(classes, sourceCode) {
-    const patterns = [];
-
-    classes.forEach(cls => {
-      // 1. SINGLETON PATTERN
-      const hasPrivateConstructor = sourceCode.includes(`private ${cls.name}()`) || sourceCode.includes(`__init__`);
-      const hasGetInstanceMethod = cls.methods?.some(m => 
-        m.name.toLowerCase().includes('getinstance') || m.name.toLowerCase().includes('get_instance')
-      );
-      const hasStaticInstance = cls.attributes?.some(attr => attr.isStatic && attr.name.toLowerCase().includes('instance'));
-
-      if (hasStaticInstance && hasGetInstanceMethod) {
-        patterns.push({
-          type: 'Singleton',
-          class: cls.name,
-          confidence: 0.95
-        });
-      }
-
-      // 2. FACTORY PATTERN
-      const createMethods = cls.methods?.filter(m => 
-        m.name.toLowerCase().startsWith('create') || m.name.toLowerCase().startsWith('build')
-      ) || [];
-
-      if (createMethods.length >= 1) {
-        patterns.push({
-          type: 'Factory',
-          class: cls.name,
-          methods: createMethods.map(m => m.name),
-          confidence: 0.80
-        });
-      }
-
-      // 3. OBSERVER PATTERN
-      const hasUpdate = cls.methods?.some(m => m.name === 'update' || m.name === 'notify');
-      if (hasUpdate) {
-        patterns.push({
-          type: 'Observer/Observable',
-          class: cls.name,
-          confidence: 0.70
-        });
-      }
-
-      // 4. STRATEGY PATTERN
-      if (cls.implements?.length > 0 && cls.methods?.length > 0 && !cls.isAbstract) {
-        patterns.push({
-          type: 'Strategy',
-          class: cls.name,
-          interface: cls.implements[0],
-          confidence: 0.75
-        });
-      }
-    });
-
-    return patterns;
-  }
-
-  // ============================================================
-  // Convert parsed AST to CodeSync UML Model
-  // ============================================================
-
-  static convertToUMLModel(classes, relationships) {
+  static transformToUMLModel(classes, relationships) {
     const elements = classes.map((cls, idx) => ({
       id: cls.id,
       type: cls.isAbstract ? 'abstract' : 'class',
@@ -642,11 +613,15 @@ class CodeToUMLConverter {
 
     const connections = relationships.map(rel => ({
       id: `conn_${Date.now()}_${Math.random()}`,
-      sourceId: rel.sourceId,
-      targetId: rel.targetId,
+      from: rel.sourceId,  // Changed from sourceId to from
+      to: rel.targetId,    // Changed from targetId to to
       type: rel.type,
       label: rel.label || '',
-      multiplicity: rel.multiplicity || ''
+      multiplicity: rel.multiplicity || '',
+      fromMultiplicity: '',
+      toMultiplicity: rel.multiplicity || '',
+      fromRole: '',
+      toRole: ''
     }));
 
     return { elements, connections };
