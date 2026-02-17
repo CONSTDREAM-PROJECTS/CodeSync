@@ -627,12 +627,56 @@ const UMLEditor = () => {
                 
                 if (!fromEl || !toEl) return null;
 
-                const x1 = fromEl.x + fromEl.width / 2;
-                const y1 = fromEl.y + fromEl.height / 2;
-                const x2 = toEl.x + toEl.width / 2;
-                const y2 = toEl.y + toEl.height / 2;
+                // ── Edge-to-edge line calculation ──────────────────────────
+                // Instead of connecting box centres (which draws the line
+                // through the boxes), we find where the line exits each box.
+                const getEdgePoint = (bx, by, bw, bh, tx, ty) => {
+                  const cx = bx + bw / 2;
+                  const cy = by + bh / 2;
+                  const dx = tx - cx;
+                  const dy = ty - cy;
+                  if (dx === 0 && dy === 0) return { x: cx, y: cy };
+                  const scaleX = dx !== 0 ? (bw / 2) / Math.abs(dx) : Infinity;
+                  const scaleY = dy !== 0 ? (bh / 2) / Math.abs(dy) : Infinity;
+                  const scale  = Math.min(scaleX, scaleY);
+                  return { x: cx + dx * scale, y: cy + dy * scale };
+                };
+
+                const fromCx = fromEl.x + fromEl.width  / 2;
+                const fromCy = fromEl.y + fromEl.height / 2;
+                const toCx   = toEl.x   + toEl.width    / 2;
+                const toCy   = toEl.y   + toEl.height   / 2;
+
+                const p1 = getEdgePoint(fromEl.x, fromEl.y, fromEl.width, fromEl.height, toCx,   toCy);
+                const p2 = getEdgePoint(toEl.x,   toEl.y,   toEl.width,  toEl.height,   fromCx, fromCy);
+
+                const x1 = p1.x;
+                const y1 = p1.y;
+                const x2 = p2.x;
+                const y2 = p2.y;
                 const midX = (x1 + x2) / 2;
                 const midY = (y1 + y2) / 2;
+
+                // Unit vector along the line (for label offsets)
+                const len = Math.hypot(x2 - x1, y2 - y1) || 1;
+                const ux  = (x2 - x1) / len;
+                const uy  = (y2 - y1) / len;
+                // Perpendicular unit vector
+                const px  = -uy;
+                const py  =  ux;
+                // Labels sit 30px along the line from each endpoint, 12px perpendicular
+                const LABEL_DIST = 30;
+                const LABEL_PERP = 12;
+
+                const fromLabelX = x1 + ux * LABEL_DIST + px * LABEL_PERP;
+                const fromLabelY = y1 + uy * LABEL_DIST + py * LABEL_PERP;
+                const toLabelX   = x2 - ux * LABEL_DIST + px * LABEL_PERP;
+                const toLabelY   = y2 - uy * LABEL_DIST + py * LABEL_PERP;
+                // Role labels sit 24px perp (below the multiplicity)
+                const fromRoleX  = x1 + ux * LABEL_DIST + px * (LABEL_PERP + 14);
+                const fromRoleY  = y1 + uy * LABEL_DIST + py * (LABEL_PERP + 14);
+                const toRoleX    = x2 - ux * LABEL_DIST + px * (LABEL_PERP + 14);
+                const toRoleY    = y2 - uy * LABEL_DIST + py * (LABEL_PERP + 14);
 
                 let strokeDasharray = 'none';
                 let markerEnd = '';
@@ -668,11 +712,9 @@ const UMLEditor = () => {
 
                 return (
                   <g key={conn.id}>
+                    {/* Visible line */}
                     <line
-                      x1={x1}
-                      y1={y1}
-                      x2={x2}
-                      y2={y2}
+                      x1={x1} y1={y1} x2={x2} y2={y2}
                       stroke={selectedConnection?.id === conn.id ? '#007acc' : '#cccccc'}
                       strokeWidth={selectedConnection?.id === conn.id ? 3 : 2}
                       strokeDasharray={strokeDasharray}
@@ -684,11 +726,9 @@ const UMLEditor = () => {
                       }}
                       style={{ cursor: 'pointer' }}
                     />
+                    {/* Wide invisible hit-area so the line is easy to click */}
                     <line
-                      x1={x1}
-                      y1={y1}
-                      x2={x2}
-                      y2={y2}
+                      x1={x1} y1={y1} x2={x2} y2={y2}
                       stroke="transparent"
                       strokeWidth="10"
                       onClick={(e) => {
@@ -699,28 +739,31 @@ const UMLEditor = () => {
                       style={{ cursor: 'pointer' }}
                     />
 
+                    {/* Multiplicity labels near each endpoint */}
                     {conn.fromMultiplicity && (
-                      <text x={x1 + (x2 - x1) * 0.15} y={y1 + (y2 - y1) * 0.15 - 5} fill="#00ff00" fontSize="12" fontWeight="bold">
+                      <text x={fromLabelX} y={fromLabelY} fill="#aaaaaa" fontSize="11" textAnchor="middle">
                         {conn.fromMultiplicity}
                       </text>
                     )}
                     {conn.toMultiplicity && (
-                      <text x={x1 + (x2 - x1) * 0.85} y={y1 + (y2 - y1) * 0.85 - 5} fill="#00ff00" fontSize="12" fontWeight="bold">
+                      <text x={toLabelX} y={toLabelY} fill="#aaaaaa" fontSize="11" textAnchor="middle">
                         {conn.toMultiplicity}
                       </text>
                     )}
+                    {/* Relationship label at midpoint */}
                     {conn.label && (
-                      <text x={midX} y={midY - 10} fill="#ffff00" fontSize="12" fontWeight="bold" textAnchor="middle">
+                      <text x={midX} y={midY - 8} fill="#cccccc" fontSize="11" textAnchor="middle">
                         {conn.label}
                       </text>
                     )}
+                    {/* Role labels near each endpoint, below multiplicity */}
                     {conn.fromRole && (
-                      <text x={x1 + (x2 - x1) * 0.15} y={y1 + (y2 - y1) * 0.15 + 15} fill="#ff00ff" fontSize="11" fontStyle="italic">
+                      <text x={fromRoleX} y={fromRoleY} fill="#888888" fontSize="10" fontStyle="italic" textAnchor="middle">
                         {conn.fromRole}
                       </text>
                     )}
                     {conn.toRole && (
-                      <text x={x1 + (x2 - x1) * 0.85} y={y1 + (y2 - y1) * 0.85 + 15} fill="#ff00ff" fontSize="11" fontStyle="italic">
+                      <text x={toRoleX} y={toRoleY} fill="#888888" fontSize="10" fontStyle="italic" textAnchor="middle">
                         {conn.toRole}
                       </text>
                     )}

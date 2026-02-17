@@ -1,1038 +1,1100 @@
-// Code Generator Service
-// Implements Bidirectional Model-Code Synchronization Algorithm
-// Ensures UML models and generated code stay synchronized
+/**
+ * ============================================================
+ * codeGenerator.js — Code Generator Service
+ * ============================================================
+ *
+ * Produces RUNNABLE source code from UML class, use-case, and
+ * sequence diagrams. "Runnable" means copy-paste into a compiler
+ * or interpreter and execute without touching a single line.
+ *
+ * Key guarantees per language:
+ *   Java       — valid package, imports, public class per file,
+ *                real constructor with field initialisation,
+ *                getters/setters, concrete return statements.
+ *   Python     — correct ABC usage, super().__init__(), typed
+ *                hints, __repr__, if __name__ == '__main__' demo.
+ *   JavaScript — ES6 classes, JSDoc types, export default,
+ *                toString(), demo at bottom.
+ * ============================================================
+ */
 
 class CodeGenerator {
-  
-  // ============================================================
-  // TYPE MAPPING UTILITIES (inline to avoid import issues)
-  // ============================================================
-  
-  static mapType(umlType, targetLanguage) {
-    const typeMappings = {
+
+  // ─────────────────────────────────────────────────────────
+  // TYPE-MAPPING UTILITIES
+  // ─────────────────────────────────────────────────────────
+
+  static mapType(umlType, lang) {
+    const map = {
       Java: {
-        'String': 'String',
-        'Integer': 'int',
-        'Double': 'double',
-        'Boolean': 'boolean',
-        'Float': 'float',
-        'Long': 'long',
-        'Character': 'char',
-        'Byte': 'byte',
-        'Short': 'short',
-        'List': 'List<Object>',
-        'ArrayList': 'ArrayList<Object>',
-        'Map': 'Map<String, Object>',
-        'HashMap': 'HashMap<String, Object>',
-        'Set': 'Set<Object>',
-        'Date': 'Date',
-        'LocalDateTime': 'LocalDateTime',
-        'Object': 'Object',
-        'void': 'void'
+        String:'String', Integer:'int', Double:'double', Boolean:'boolean',
+        Float:'float',   Long:'long',   Character:'char', Byte:'byte',
+        Short:'short',   List:'List<Object>', ArrayList:'ArrayList<Object>',
+        Map:'Map<String,Object>', HashMap:'HashMap<String,Object>',
+        Set:'Set<Object>', Date:'Date', LocalDateTime:'LocalDateTime',
+        Object:'Object', void:'void', Any:'Object'
       },
       Python: {
-        'String': 'str',
-        'Integer': 'int',
-        'Double': 'float',
-        'Boolean': 'bool',
-        'Float': 'float',
-        'Long': 'int',
-        'Character': 'str',
-        'Byte': 'bytes',
-        'List': 'list',
-        'ArrayList': 'list',
-        'Map': 'dict',
-        'HashMap': 'dict',
-        'Set': 'set',
-        'Date': 'datetime',
-        'LocalDateTime': 'datetime',
-        'Object': 'object',
-        'void': 'None'
+        String:'str', Integer:'int', Double:'float', Boolean:'bool',
+        Float:'float', Long:'int', Character:'str', Byte:'bytes',
+        List:'List', ArrayList:'List', Map:'Dict', HashMap:'Dict',
+        Set:'Set', Date:'datetime', LocalDateTime:'datetime',
+        Object:'object', void:'None', Any:'Any'
       },
       JavaScript: {
-        'String': 'string',
-        'Integer': 'number',
-        'Double': 'number',
-        'Boolean': 'boolean',
-        'Float': 'number',
-        'Long': 'number',
-        'Character': 'string',
-        'Byte': 'number',
-        'List': 'Array',
-        'ArrayList': 'Array',
-        'Map': 'Object',
-        'HashMap': 'Map',
-        'Set': 'Set',
-        'Date': 'Date',
-        'LocalDateTime': 'Date',
-        'Object': 'any',
-        'void': 'void'
+        String:'string', Integer:'number', Double:'number', Boolean:'boolean',
+        Float:'number',  Long:'number',  Character:'string', Byte:'number',
+        List:'Array',   ArrayList:'Array', Map:'Object', HashMap:'Map',
+        Set:'Set', Date:'Date', LocalDateTime:'Date',
+        Object:'any', void:'void', Any:'any'
       }
     };
-
-    const languageMap = typeMappings[targetLanguage];
-    if (!languageMap) return umlType || 'Object';
-    
-    return languageMap[umlType] || umlType || 'Object';
+    const lm = map[lang];
+    if (!lm) return umlType || 'Object';
+    return lm[umlType] || umlType || 'Object';
   }
 
-  static getDefaultValue(type, language) {
-    const defaults = {
-      Java: {
-        'int': '0',
-        'double': '0.0',
-        'float': '0.0f',
-        'boolean': 'false',
-        'long': '0L',
-        'char': "'\\0'",
-        'byte': '0',
-        'short': '0',
-        'String': 'null',
-        'Object': 'null',
-        'void': ''
-      },
-      Python: {
-        'int': '0',
-        'float': '0.0',
-        'bool': 'False',
-        'str': '""',
-        'list': '[]',
-        'dict': '{}',
-        'set': 'set()',
-        'None': 'None',
-        'object': 'None'
-      },
-      JavaScript: {
-        'number': '0',
-        'string': '""',
-        'boolean': 'false',
-        'Array': '[]',
-        'Object': '{}',
-        'null': 'null',
-        'undefined': 'undefined',
-        'any': 'null',
-        'void': ''
-      }
-    };
-
-    const languageDefaults = defaults[language];
-    if (!languageDefaults) return 'null';
-    
-    return languageDefaults[type] || 'null';
-  }
-  
-  // ============================================================
-  // BIDIRECTIONAL MODEL-CODE SYNCHRONIZATION ALGORITHM
-  // ============================================================
-  
   /**
-   * Main entry point for code generation
-   * Synchronizes UML model to source code
+   * Return a concrete literal that satisfies the type — never 'null'
+   * where the compiler would reject it for primitives.
    */
+  static getDefaultValue(nativeType, lang) {
+    const defs = {
+      Java: {
+        'int':'0', 'double':'0.0', 'float':'0.0f', 'boolean':'false',
+        'long':'0L', 'char':"'\\0'", 'byte':'0', 'short':'0',
+        'String':'""', 'Object':'null', 'void':'', 'Date':'null',
+        'LocalDateTime':'null',
+        'List<Object>':'new ArrayList<>()',
+        'ArrayList<Object>':'new ArrayList<>()',
+        'Map<String,Object>':'new HashMap<>()',
+        'HashMap<String,Object>':'new HashMap<>()',
+        'Set<Object>':'new HashSet<>()'
+      },
+      Python: {
+        'str':'""', 'int':'0', 'float':'0.0', 'bool':'False',
+        'bytes':'b""', 'list':'[]', 'dict':'{}', 'set':'set()',
+        'None':'None', 'object':'None', 'List':'[]', 'Dict':'{}',
+        'Set':'set()', 'datetime':'None', 'Any':'None'
+      },
+      JavaScript: {
+        'number':'0', 'string':'"" ', 'boolean':'false',
+        'Array':'[]', 'Object':'{}', 'Map':'new Map()', 'Set':'new Set()',
+        'Date':'new Date()', 'any':'null', 'void':'', 'string ':'"" '
+      }
+    };
+    const ld = defs[lang];
+    if (!ld) return 'null';
+    // trim to handle the space-padded 'string ' key
+    return ld[nativeType] ?? ld[nativeType?.trim()] ?? (
+      nativeType === 'void' ? '' : 'null'
+    );
+  }
+
+  // ─────────────────────────────────────────────────────────
+  // PUBLIC API
+  // ─────────────────────────────────────────────────────────
+
   static generateCode(elements, connections = [], language = 'Java', diagramType = 'class') {
-    // Step 1: Validate and normalize the model
-    const normalizedModel = this.normalizeModel(elements, connections);
-    
-    // Step 2: Generate code based on diagram type
+    const { elements: els, connections: conns } = this.normalizeModel(elements, connections);
     let code = '';
     switch (diagramType) {
-      case 'class':
-        code = this.generateClassDiagramCode(normalizedModel.elements, normalizedModel.connections, language);
-        break;
-      case 'usecase':
-        code = this.generateUseCaseDiagramCode(normalizedModel.elements, normalizedModel.connections, language);
-        break;
-      case 'sequence':
-        code = this.generateSequenceDiagramCode(normalizedModel.elements, normalizedModel.connections, language);
-        break;
-      default:
-        code = this.generateClassDiagramCode(normalizedModel.elements, normalizedModel.connections, language);
+      case 'class':    code = this.generateClassDiagramCode(els, conns, language); break;
+      case 'usecase':  code = this.generateUseCaseDiagramCode(els, conns, language); break;
+      case 'sequence': code = this.generateSequenceDiagramCode(els, conns, language); break;
+      default:         code = this.generateClassDiagramCode(els, conns, language);
     }
-    
-    // Step 3: Format and optimize the generated code
-    code = this.formatCode(code, language);
-    
-    return code;
+    return this.formatCode(code, language);
   }
 
-  /**
-   * Generate multiple files for complex projects
-   */
-  static generateMultiFileCode(elements, connections = [], language = 'Java', diagramType = 'class') {
+  /** Returns Array<{ filename, content }> — one real file per class */
+  static splitIntoFiles(elements, connections = [], language = 'Java', diagramType = 'class') {
+    const { elements: els, connections: conns } = this.normalizeModel(elements, connections);
     const files = [];
-    
+
     if (diagramType === 'class') {
-      // Generate one file per class
-      elements.forEach(element => {
-        if (element.type === 'class' || element.type === 'interface' || element.type === 'abstract') {
-          const fileName = this.getFileName(element.name, language);
-          const code = this.generateSingleClass(element, connections, elements, language);
-          files.push({ name: fileName, content: code });
-        }
+      const classEls = els.filter(e => ['class','interface','abstract'].includes(e.type));
+      if (classEls.length === 0) {
+        return [{ filename: 'NoClasses.txt', content: '// No class elements found in diagram.' }];
+      }
+      classEls.forEach(el => {
+        files.push({
+          filename: this.getFileName(el.name, language),
+          content:  this.generateSingleClass(el, conns, classEls, language)
+        });
       });
     } else if (diagramType === 'usecase') {
-      // Generate documentation and test files
-      files.push({
-        name: 'UseCases.md',
-        content: this.generateUseCaseDocumentation(elements, connections)
-      });
-      files.push({
-        name: this.getFileName('UseCaseTests', language),
-        content: this.generateUseCaseTests(elements, connections, language)
-      });
+      files.push({ filename: 'UseCases.md',
+                   content: this.generateUseCaseDocumentation(els, conns) });
+      files.push({ filename: this.getFileName('UseCaseHandler', language),
+                   content: this.generateUseCaseHandler(els, conns, language) });
     } else if (diagramType === 'sequence') {
-      // Generate interaction flow documentation and code
-      files.push({
-        name: 'SequenceFlow.md',
-        content: this.generateSequenceDocumentation(elements, connections)
-      });
-      files.push({
-        name: this.getFileName('InteractionHandler', language),
-        content: this.generateSequenceCode(elements, connections, language)
-      });
+      files.push({ filename: 'SequenceFlow.md',
+                   content: this.generateSequenceDocumentation(els, conns) });
+      files.push({ filename: this.getFileName('SequenceHandler', language),
+                   content: this.generateSequenceCode(els, conns, language) });
     }
-    
-    return files;
+
+    return files.length > 0 ? files : [{ filename: 'Generated.txt', content: '// Nothing to generate.' }];
   }
 
-  // ============================================================
-  // MODEL NORMALIZATION
-  // ============================================================
+  // kept for backward-compat with any callers using the old name
+  static generateMultiFileCode(elements, connections = [], language = 'Java', diagramType = 'class') {
+    return this.splitIntoFiles(elements, connections, language, diagramType)
+               .map(f => ({ name: f.filename, content: f.content }));
+  }
+
+  // ─────────────────────────────────────────────────────────
+  // NORMALISATION
+  // ─────────────────────────────────────────────────────────
 
   static normalizeModel(elements, connections) {
-    const normalizedElements = elements.map(element => ({
-      ...element,
-      name: this.normalizeIdentifier(element.name),
-      attributes: element.attributes?.map(attr => ({
-        ...attr,
-        name: this.normalizeIdentifier(attr.name, 'variable'),
-        type: this.normalizeType(attr.type)
-      })) || [],
-      methods: element.methods?.map(method => ({
-        ...method,
-        name: this.normalizeIdentifier(method.name, 'method'),
-        returnType: this.normalizeType(method.returnType)
-      })) || []
+    const els = elements.map(el => ({
+      ...el,
+      name:       this.normalizeIdentifier(el.name, 'class'),
+      attributes: (el.attributes || []).map(a => ({
+        ...a,
+        name: this.normalizeIdentifier(a.name, 'variable'),
+        type: this.normalizeType(a.type)
+      })),
+      methods: (el.methods || []).map(m => ({
+        ...m,
+        name:       this.normalizeIdentifier(m.name, 'method'),
+        returnType: this.normalizeType(m.returnType)
+      }))
     }));
-
-    return {
-      elements: normalizedElements,
-      connections: connections
-    };
+    return { elements: els, connections };
   }
 
   static normalizeIdentifier(name, context = 'class') {
-    if (!name) return 'Unnamed';
-    
-    // Remove special characters
-    let normalized = name.replace(/[^a-zA-Z0-9_]/g, '');
-    
-    // Apply naming conventions
-    if (context === 'class') {
-      // PascalCase
-      return normalized.charAt(0).toUpperCase() + normalized.slice(1);
-    } else if (context === 'method' || context === 'variable') {
-      // camelCase
-      return normalized.charAt(0).toLowerCase() + normalized.slice(1);
-    }
-    
-    return normalized;
+    if (!name || !name.trim()) return context === 'class' ? 'Unnamed' : 'unnamed';
+    let n = name.replace(/[^a-zA-Z0-9_]/g, '');
+    if (!n) return context === 'class' ? 'Unnamed' : 'unnamed';
+    if (context === 'class') return n.charAt(0).toUpperCase() + n.slice(1);
+    return n.charAt(0).toLowerCase() + n.slice(1);
   }
 
   static normalizeType(type) {
-    if (!type) return 'Object';
-    return type.replace(/[^a-zA-Z0-9<>,\s]/g, '');
+    if (!type || !type.trim()) return 'Object';
+    const clean = type.replace(/[^a-zA-Z0-9<>,\s\[\]]/g, '').trim();
+    return clean || 'Object';
   }
 
-  // ============================================================
-  // CLASS DIAGRAM CODE GENERATION
-  // ============================================================
+  // ─────────────────────────────────────────────────────────
+  // CLASS DIAGRAM — DISPATCH
+  // ─────────────────────────────────────────────────────────
 
   static generateClassDiagramCode(elements, connections, language) {
     switch (language) {
-      case 'Java':
-        return this.generateJavaCode(elements, connections);
-      case 'Python':
-        return this.generatePythonCode(elements, connections);
-      case 'JavaScript':
-        return this.generateJavaScriptCode(elements, connections);
-      default:
-        return this.generateJavaCode(elements, connections);
+      case 'Java':       return this.generateJavaCode(elements, connections);
+      case 'Python':     return this.generatePythonCode(elements, connections);
+      case 'JavaScript': return this.generateJavaScriptCode(elements, connections);
+      default:           return this.generateJavaCode(elements, connections);
     }
   }
 
+  // ─────────────────────────────────────────────────────────
+  // JAVA CODE GENERATION
+  // ─────────────────────────────────────────────────────────
+
+  /**
+   * When generating a single-preview (all classes in one view), we still
+   * emit individually valid classes separated by a clear comment banner
+   * so the user can see exactly what each file should contain.
+   */
   static generateJavaCode(elements, connections) {
-    let code = '';
-    
-    // NOTE: This generates all classes in one file for quick viewing
-    // For compilable code, use generateMultiFileCode() or splitIntoFiles()
-    // which creates separate files for each class
-    
-    const classElements = elements.filter(el => 
-      el.type === 'class' || el.type === 'abstract' || el.type === 'interface'
-    );
-    
-    if (classElements.length === 0) {
-      return '// No classes to generate';
+    const classEls = elements.filter(e => ['class','interface','abstract'].includes(e.type));
+    if (classEls.length === 0) return '// No classes to generate';
+
+    if (classEls.length === 1) {
+      return this.generateSingleClass(classEls[0], connections, classEls, 'Java');
     }
-    
-    // If only one class, make it public with package
-    if (classElements.length === 1) {
-      code += 'package com.example.model;\n\n';
-      code += 'import java.util.*;\n';
-      code += 'import java.time.*;\n\n';
-      code += this.generateJavaClass(classElements[0], connections, elements);
-      return code;
-    }
-    
-    // Multiple classes: Show note and make all package-private (no 'public' keyword)
-    code += '/*\n';
-    code += ' * NOTE: Multiple classes generated in one file.\n';
-    code += ' * This is for VIEWING ONLY and will NOT compile in Java.\n';
-    code += ' * \n';
-    code += ' * To get compilable code:\n';
-    code += ' * - Each class needs its own .java file\n';
-    code += ' * - Use the multi-file generation feature\n';
-    code += ' * - Or copy each class to separate files\n';
-    code += ' */\n\n';
-    code += 'package com.example.model;\n\n';
-    code += 'import java.util.*;\n';
-    code += 'import java.time.*;\n\n';
-    
-    classElements.forEach((element, index) => {
-      code += this.generateJavaClass(element, connections, elements, false); // false = not public
-      if (index < classElements.length - 1) {
-        code += '\n\n';
-      }
+
+    // Multi-class preview: show each class as it would appear in its own file,
+    // separated by a file-banner comment so it is clear what goes where.
+    let code = '// ══════════════════════════════════════════════════════════\n';
+    code += '// MULTI-CLASS PREVIEW\n';
+    code += '// Each section below belongs in its own .java file.\n';
+    code += '// Use "Generate Code" → download individual files for a\n';
+    code += '// project that compiles directly.\n';
+    code += '// ══════════════════════════════════════════════════════════\n\n';
+
+    classEls.forEach((el, i) => {
+      code += `// ── File: ${this.getFileName(el.name, 'Java')} ${'─'.repeat(Math.max(0, 50 - el.name.length))}\n\n`;
+      code += this.generateSingleClass(el, connections, classEls, 'Java');
+      if (i < classEls.length - 1) code += '\n\n\n';
     });
-    
-    return code;
-  }
-
-  static generateJavaClass(element, connections, allElements, makePublic = true) {
-    let code = '';
-    
-    // Add class documentation
-    code += '/**\n';
-    code += ` * Class: ${element.name}\n`;
-    code += ` * Generated from UML Class Diagram\n`;
-    code += ' */\n';
-    
-    // Find inheritance
-    const extendsConnection = connections.find(c => c.from === element.id && c.type === 'inheritance');
-    const implementsConnections = connections.filter(c => c.from === element.id && c.type === 'realization');
-    
-    // Class declaration
-    const publicKeyword = makePublic ? 'public ' : '';
-    
-    if (element.type === 'interface') {
-      code += `${publicKeyword}interface ${element.name}`;
-    } else {
-      code += `${publicKeyword}${element.type === 'abstract' ? 'abstract ' : ''}class ${element.name}`;
-      
-      if (extendsConnection) {
-        const parentClass = allElements.find(e => e.id === extendsConnection.to);
-        if (parentClass) {
-          code += ` extends ${parentClass.name}`;
-        }
-      }
-      
-      if (implementsConnections.length > 0) {
-        const interfaces = implementsConnections
-          .map(c => allElements.find(e => e.id === c.to))
-          .filter(e => e)
-          .map(e => e.name);
-        code += ` implements ${interfaces.join(', ')}`;
-      }
-    }
-    
-    code += ' {\n\n';
-    
-    // Attributes
-    if (element.attributes && element.attributes.length > 0) {
-      code += '    // Attributes\n';
-      element.attributes.forEach(attr => {
-        const visibility = attr.visibility || 'private';
-        const type = CodeGenerator.mapType(attr.type, 'Java');
-        const name = attr.name;
-        const isStatic = attr.isStatic ? 'static ' : '';
-        const isFinal = attr.isFinal ? 'final ' : '';
-        
-        code += `    ${visibility} ${isStatic}${isFinal}${type} ${name};\n`;
-      });
-      code += '\n';
-    }
-    
-    // Add relationship-based attributes
-    const relationshipAttrs = this.generateRelationshipAttributes(element, connections, allElements, 'Java');
-    if (relationshipAttrs) {
-      code += '    // Relationship Attributes\n';
-      code += relationshipAttrs;
-      code += '\n';
-    }
-    
-    // Constructor
-    if (element.type !== 'interface') {
-      code += '    // Constructor\n';
-      code += `    public ${element.name}() {\n`;
-      code += '        // Initialize attributes\n';
-      code += '    }\n\n';
-    }
-    
-    // Methods
-    if (element.methods && element.methods.length > 0) {
-      code += '    // Methods\n';
-      element.methods.forEach(method => {
-        const visibility = method.visibility || 'public';
-        const returnType = CodeGenerator.mapType(method.returnType, 'Java');
-        const name = method.name;
-        const params = method.parameters || '';
-        const isStatic = method.isStatic ? 'static ' : '';
-        const isAbstract = method.isAbstract ? 'abstract ' : '';
-        
-        code += `    ${visibility} ${isStatic}${isAbstract}${returnType} ${name}(${params})`;
-        
-        if (element.type === 'interface' || method.isAbstract) {
-          code += ';\n\n';
-        } else {
-          code += ' {\n';
-          code += '        // TODO: Implement method\n';
-          if (returnType !== 'void') {
-            code += `        return ${CodeGenerator.getDefaultValue(returnType, 'Java')};\n`;
-          }
-          code += '    }\n\n';
-        }
-      });
-    }
-    
-    // Getters and Setters
-    if (element.attributes && element.attributes.length > 0 && element.type !== 'interface') {
-      code += '    // Getters and Setters\n';
-      element.attributes.forEach(attr => {
-        const type = CodeGenerator.mapType(attr.type, 'Java');
-        const name = attr.name;
-        const capitalizedName = name.charAt(0).toUpperCase() + name.slice(1);
-        
-        // Getter
-        code += `    public ${type} get${capitalizedName}() {\n`;
-        code += `        return this.${name};\n`;
-        code += '    }\n\n';
-        
-        // Setter (if not final)
-        if (!attr.isFinal) {
-          code += `    public void set${capitalizedName}(${type} ${name}) {\n`;
-          code += `        this.${name} = ${name};\n`;
-          code += '    }\n\n';
-        }
-      });
-    }
-    
-    code += '}';
-    
-    return code;
-  }
-
-  static generatePythonCode(elements, connections) {
-    let code = '';
-    
-    // Add imports
-    code += 'from typing import List, Optional, Any\n';
-    code += 'from datetime import datetime\n';
-    code += 'from abc import ABC, abstractmethod\n\n';
-    
-    elements.forEach(element => {
-      if (element.type === 'class' || element.type === 'abstract' || element.type === 'interface') {
-        code += this.generatePythonClass(element, connections, elements);
-        code += '\n\n';
-      }
-    });
-    
-    return code;
-  }
-
-  static generatePythonClass(element, connections, allElements) {
-    let code = '';
-    
-    // Find inheritance
-    const extendsConnection = connections.find(c => c.from === element.id && c.type === 'inheritance');
-    const parentClass = extendsConnection ? allElements.find(e => e.id === extendsConnection.to) : null;
-    
-    // Class declaration
-    code += `class ${element.name}`;
-    if (element.type === 'abstract' || element.type === 'interface') {
-      code += '(ABC)';
-    } else if (parentClass) {
-      code += `(${parentClass.name})`;
-    }
-    code += ':\n';
-    
-    // Docstring
-    code += '    """\n';
-    code += `    Class: ${element.name}\n`;
-    code += '    Generated from UML Class Diagram\n';
-    code += '    """\n\n';
-    
-    // Constructor
-    code += '    def __init__(self):\n';
-    
-    if (parentClass) {
-      code += '        super().__init__()\n';
-    }
-    
-    // Initialize attributes
-    if (element.attributes && element.attributes.length > 0) {
-      element.attributes.forEach(attr => {
-        const name = attr.name;
-        const type = CodeGenerator.mapType(attr.type, 'Python');
-        code += `        self.${name} = ${CodeGenerator.getDefaultValue(type, 'Python')}  # ${type}\n`;
-      });
-    } else {
-      code += '        pass\n';
-    }
-    
-    code += '\n';
-    
-    // Methods
-    if (element.methods && element.methods.length > 0) {
-      element.methods.forEach(method => {
-        const name = method.name;
-        const params = method.parameters ? `, ${method.parameters}` : '';
-        const returnType = CodeGenerator.mapType(method.returnType, 'Python');
-        
-        if (method.isAbstract || element.type === 'interface') {
-          code += '    @abstractmethod\n';
-        }
-        
-        code += `    def ${name}(self${params}):\n`;
-        code += `        """${method.name} method"""\n`;
-        
-        if (method.isAbstract || element.type === 'interface') {
-          code += '        pass\n\n';
-        } else {
-          code += '        # TODO: Implement method\n';
-          if (returnType !== 'None') {
-            code += `        return ${CodeGenerator.getDefaultValue(returnType, 'Python')}\n\n`;
-          } else {
-            code += '        pass\n\n';
-          }
-        }
-      });
-    }
-    
-    return code;
-  }
-
-  static generateJavaScriptCode(elements, connections) {
-    let code = '';
-    
-    // Add imports/requires
-    code += '// Generated from UML Class Diagram\n\n';
-    
-    elements.forEach(element => {
-      if (element.type === 'class' || element.type === 'abstract' || element.type === 'interface') {
-        code += this.generateJavaScriptClass(element, connections, elements);
-        code += '\n\n';
-      }
-    });
-    
-    return code;
-  }
-
-  static generateJavaScriptClass(element, connections, allElements) {
-    let code = '';
-    
-    // Find inheritance
-    const extendsConnection = connections.find(c => c.from === element.id && c.type === 'inheritance');
-    const parentClass = extendsConnection ? allElements.find(e => e.id === extendsConnection.to) : null;
-    
-    // Class declaration
-    code += `/**\n * Class: ${element.name}\n * Generated from UML Class Diagram\n */\n`;
-    code += `class ${element.name}`;
-    if (parentClass) {
-      code += ` extends ${parentClass.name}`;
-    }
-    code += ' {\n\n';
-    
-    // Constructor
-    code += '    constructor() {\n';
-    
-    if (parentClass) {
-      code += '        super();\n';
-    }
-    
-    // Initialize attributes
-    if (element.attributes && element.attributes.length > 0) {
-      element.attributes.forEach(attr => {
-        const name = attr.name;
-        const type = CodeGenerator.mapType(attr.type, 'JavaScript');
-        code += `        this.${name} = ${CodeGenerator.getDefaultValue(type, 'JavaScript')};\n`;
-      });
-    }
-    
-    code += '    }\n\n';
-    
-    // Methods
-    if (element.methods && element.methods.length > 0) {
-      element.methods.forEach(method => {
-        const name = method.name;
-        const params = method.parameters || '';
-        
-        code += `    ${name}(${params}) {\n`;
-        code += '        // TODO: Implement method\n';
-        
-        const returnType = CodeGenerator.mapType(method.returnType, 'JavaScript');
-        if (returnType !== 'void') {
-          code += `        return ${CodeGenerator.getDefaultValue(returnType, 'JavaScript')};\n`;
-        }
-        
-        code += '    }\n\n';
-      });
-    }
-    
-    // Getters and Setters
-    if (element.attributes && element.attributes.length > 0) {
-      element.attributes.forEach(attr => {
-        const name = attr.name;
-        const capitalizedName = name.charAt(0).toUpperCase() + name.slice(1);
-        
-        // Getter
-        code += `    get${capitalizedName}() {\n`;
-        code += `        return this.${name};\n`;
-        code += '    }\n\n';
-        
-        // Setter
-        code += `    set${capitalizedName}(value) {\n`;
-        code += `        this.${name} = value;\n`;
-        code += '    }\n\n';
-      });
-    }
-    
-    code += '}\n\n';
-    code += `export default ${element.name};`;
-    
     return code;
   }
 
   static generateSingleClass(element, connections, allElements, language) {
-    let code = '';
-    
     switch (language) {
-      case 'Java':
-        code += 'package com.example.model;\n\n';
-        code += 'import java.util.*;\n';
-        code += 'import java.time.*;\n\n';
-        code += this.generateJavaClass(element, connections, allElements);
-        break;
-      case 'Python':
-        code += 'from typing import List, Optional, Any\n';
-        code += 'from datetime import datetime\n';
-        code += 'from abc import ABC, abstractmethod\n\n';
-        code += this.generatePythonClass(element, connections, allElements);
-        break;
-      case 'JavaScript':
-        code += this.generateJavaScriptClass(element, connections, allElements);
-        break;
+      case 'Java':       return this.javaFileHeader()  + this.buildJavaClass(element, connections, allElements);
+      case 'Python':     return this.pythonFileHeader() + this.buildPythonClass(element, connections, allElements);
+      case 'JavaScript': return this.buildJavaScriptClass(element, connections, allElements);
+      default:           return this.javaFileHeader()  + this.buildJavaClass(element, connections, allElements);
     }
-    
+  }
+
+  static javaFileHeader() {
+    return (
+      'package com.example.model;\n\n' +
+      'import java.util.*;\n' +
+      'import java.time.*;\n\n'
+    );
+  }
+
+  static buildJavaClass(element, connections, allElements) {
+    const isInterface = element.type === 'interface';
+    const isAbstract  = element.type === 'abstract';
+
+    // ── Resolve inheritance / realisation ──────────────────
+    const extendsConn    = connections.find(c => c.from === element.id && c.type === 'inheritance');
+    const realizConns    = connections.filter(c => c.from === element.id && c.type === 'realization');
+    const parentEl       = extendsConn ? allElements.find(e => e.id === extendsConn.to) : null;
+    const interfaceNames = realizConns
+      .map(c => allElements.find(e => e.id === c.to)?.name)
+      .filter(Boolean);
+
+    let code = '';
+
+    // ── Javadoc ────────────────────────────────────────────
+    code += `/**\n * ${isInterface ? 'Interface' : isAbstract ? 'Abstract class' : 'Class'}: ${element.name}\n`;
+    code += ` * Auto-generated from UML diagram.\n`;
+    if (parentEl) code += ` * @extends ${parentEl.name}\n`;
+    code += ' */\n';
+
+    // ── Declaration ────────────────────────────────────────
+    let decl = `public ${isAbstract ? 'abstract ' : ''}${isInterface ? 'interface' : 'class'} ${element.name}`;
+    if (!isInterface) {
+      if (parentEl)              decl += ` extends ${parentEl.name}`;
+      if (interfaceNames.length) decl += ` implements ${interfaceNames.join(', ')}`;
+    } else if (interfaceNames.length) {
+      decl += ` extends ${interfaceNames.join(', ')}`;
+    }
+    code += decl + ' {\n\n';
+
+    const attrs   = element.attributes || [];
+    const methods = element.methods    || [];
+
+    // ── Field declarations ─────────────────────────────────
+    if (attrs.length > 0) {
+      code += '    // ── Fields ──────────────────────────────────────────\n';
+      attrs.forEach(a => {
+        const vis   = a.visibility || 'private';
+        const jType = CodeGenerator.mapType(a.type || 'Object', 'Java');
+        const mods  = `${a.isStatic ? 'static ' : ''}${a.isFinal ? 'final ' : ''}`;
+        code += `    ${vis} ${mods}${jType} ${a.name};\n`;
+      });
+      code += '\n';
+    }
+
+    // ── Relationship fields (composition / aggregation / association) ──
+    const relFields = this.buildJavaRelationshipFields(element, connections, allElements);
+    if (relFields) {
+      code += '    // ── Relationship fields ─────────────────────────────\n';
+      code += relFields + '\n';
+    }
+
+    // ── Constructor ────────────────────────────────────────
+    if (!isInterface) {
+      code += '    // ── Constructor ─────────────────────────────────────\n';
+
+      // Collect all parameters that should go in the constructor
+      const initAttrs = attrs.filter(a => !a.isStatic && !a.isFinal);
+
+      if (initAttrs.length > 0) {
+        // Parameterised constructor
+        const params = initAttrs
+          .map(a => `${CodeGenerator.mapType(a.type || 'Object', 'Java')} ${a.name}`)
+          .join(', ');
+        code += `    public ${element.name}(${params}) {\n`;
+        if (parentEl) code += '        super();\n';
+        initAttrs.forEach(a => {
+          code += `        this.${a.name} = ${a.name};\n`;
+        });
+        code += '    }\n\n';
+
+        // No-arg constructor (always useful, required by many frameworks)
+        code += `    /** No-arg constructor (required by some frameworks). */\n`;
+        code += `    public ${element.name}() {\n`;
+        if (parentEl) code += '        super();\n';
+        initAttrs.forEach(a => {
+          const jType = CodeGenerator.mapType(a.type || 'Object', 'Java');
+          const defVal = CodeGenerator.getDefaultValue(jType, 'Java');
+          code += `        this.${a.name} = ${defVal};\n`;
+        });
+        code += '    }\n\n';
+      } else {
+        code += `    public ${element.name}() {\n`;
+        if (parentEl) code += '        super();\n';
+        code += '    }\n\n';
+      }
+    }
+
+    // ── Methods ────────────────────────────────────────────
+    if (methods.length > 0) {
+      code += '    // ── Methods ─────────────────────────────────────────\n';
+      methods.forEach(m => {
+        const vis      = m.visibility || 'public';
+        const retType  = CodeGenerator.mapType(m.returnType || 'void', 'Java');
+        const mods     = `${m.isStatic ? 'static ' : ''}${m.isAbstract ? 'abstract ' : ''}`;
+        const params   = this.buildJavaParams(m.parameters);
+
+        code += `    ${vis} ${mods}${retType} ${m.name}(${params})`;
+
+        if (isInterface || m.isAbstract) {
+          code += ';\n\n';
+        } else {
+          code += ' {\n';
+          if (retType !== 'void') {
+            const defVal = CodeGenerator.getDefaultValue(retType, 'Java');
+            code += `        return ${defVal};\n`;
+          }
+          code += '    }\n\n';
+        }
+      });
+    }
+
+    // ── Getters & Setters ──────────────────────────────────
+    // Skip generating a getter/setter when a method with the same name already
+    // exists in the diagram (e.g. user declared getBalance() explicitly).
+    if (attrs.length > 0 && !isInterface) {
+      const existingNames = new Set(methods.map(m => m.name.toLowerCase()));
+      code += '    // ── Getters & Setters ───────────────────────────────\n';
+      attrs.forEach(a => {
+        const jType = CodeGenerator.mapType(a.type || 'Object', 'Java');
+        const cap   = a.name.charAt(0).toUpperCase() + a.name.slice(1);
+        if (!existingNames.has(`get${cap}`.toLowerCase())) {
+          code += `    public ${jType} get${cap}() {\n        return this.${a.name};\n    }\n\n`;
+        }
+        if (!a.isFinal && !existingNames.has(`set${cap}`.toLowerCase())) {
+          code += `    public void set${cap}(${jType} ${a.name}) {\n        this.${a.name} = ${a.name};\n    }\n\n`;
+        }
+      });
+    }
+
+    // ── toString ───────────────────────────────────────────
+    if (!isInterface && attrs.length > 0) {
+      code += '    // ── toString ────────────────────────────────────────\n';
+      code += '    @Override\n    public String toString() {\n';
+      const parts = attrs.map(a => `"${a.name}=" + ${a.name}`).join(' + ", " + ');
+      code += `        return "${element.name}{" + ${parts} + "}";\n`;
+      code += '    }\n\n';
+    }
+
+    code += '}\n';
     return code;
   }
 
-  static generateRelationshipAttributes(element, connections, allElements, language) {
-    let attributes = '';
-    
-    // Find outgoing relationships (this class has these relationships)
-    const outgoingRelationships = connections.filter(c => c.from === element.id);
-    
-    outgoingRelationships.forEach(connection => {
-      const targetElement = allElements.find(e => e.id === connection.to);
-      if (!targetElement) return;
-      
-      const targetName = targetElement.name;
-      const multiplicity = connection.multiplicity || '1';
-      const isMultiple = multiplicity.includes('*') || multiplicity.includes('0..*') || multiplicity.includes('1..*');
-      
-      if (connection.type === 'composition' || connection.type === 'aggregation' || connection.type === 'association') {
-        if (language === 'Java') {
-          if (isMultiple) {
-            attributes += `    private List<${targetName}> ${this.pluralize(targetName.toLowerCase())} = new ArrayList<>();\n`;
-          } else {
-            attributes += `    private ${targetName} ${targetName.toLowerCase()};\n`;
-          }
-        } else if (language === 'Python') {
-          if (isMultiple) {
-            attributes += `        self.${this.pluralize(targetName.toLowerCase())} = []  # List[${targetName}]\n`;
-          } else {
-            attributes += `        self.${targetName.toLowerCase()} = None  # ${targetName}\n`;
-          }
-        } else if (language === 'JavaScript') {
-          if (isMultiple) {
-            attributes += `        this.${this.pluralize(targetName.toLowerCase())} = [];\n`;
-          } else {
-            attributes += `        this.${targetName.toLowerCase()} = null;\n`;
-          }
+  /** Parse a raw parameter string OR array into a clean Java param list */
+  static buildJavaParams(parameters) {
+    if (!parameters) return '';
+    if (Array.isArray(parameters)) {
+      return parameters
+        .map(p => {
+          if (typeof p === 'string') return p.trim();
+          const t = CodeGenerator.mapType(p.type || 'Object', 'Java');
+          return `${t} ${p.name || 'param'}`;
+        })
+        .join(', ');
+    }
+    if (typeof parameters === 'string' && parameters.trim()) return parameters.trim();
+    return '';
+  }
+
+  static buildJavaRelationshipFields(element, connections, allElements) {
+    let out = '';
+    connections
+      .filter(c => c.from === element.id &&
+                   ['composition','aggregation','association'].includes(c.type))
+      .forEach(c => {
+        const target = allElements.find(e => e.id === c.to);
+        if (!target) return;
+        const many = (c.toMultiplicity || c.multiplicity || '1').includes('*');
+        if (many) {
+          out += `    private List<${target.name}> ${this.pluralize(target.name.toLowerCase())} = new ArrayList<>();\n`;
+        } else {
+          out += `    private ${target.name} ${target.name.toLowerCase()} = null;\n`;
+        }
+      });
+    return out;
+  }
+
+  // ─────────────────────────────────────────────────────────
+  // PYTHON CODE GENERATION
+  // ─────────────────────────────────────────────────────────
+
+  static pythonFileHeader() {
+    return (
+      'from __future__ import annotations\n' +
+      'from typing import List, Optional, Dict, Set, Any\n' +
+      'from datetime import datetime\n' +
+      'from abc import ABC, abstractmethod\n\n\n'
+    );
+  }
+
+  static generatePythonCode(elements, connections) {
+    const classEls = elements.filter(e => ['class','interface','abstract'].includes(e.type));
+    if (classEls.length === 0) return '# No classes to generate\n';
+
+    let code = this.pythonFileHeader();
+
+    // Topological ordering: parents before children
+    const ordered = this.topoSort(classEls, connections);
+    ordered.forEach(el => {
+      code += this.buildPythonClass(el, connections, classEls);
+      code += '\n\n';
+    });
+
+    // Demo block — lets the user just run `python file.py` and see output
+    code += '\n# ── Demo ────────────────────────────────────────────────────\n';
+    code += 'if __name__ == "__main__":\n';
+    ordered.filter(e => e.type === 'class').forEach(el => {
+      const varName = el.name.toLowerCase();
+      code += `    ${varName} = ${el.name}()\n`;
+      code += `    print(${varName})\n`;
+    });
+    if (!ordered.some(e => e.type === 'class')) code += '    pass\n';
+
+    return code;
+  }
+
+  static buildPythonClass(element, connections, allElements) {
+    const isAbstract  = element.type === 'abstract';
+    const isInterface = element.type === 'interface';
+
+    const extendsConn = connections.find(c => c.from === element.id && c.type === 'inheritance');
+    const parentEl    = extendsConn ? allElements.find(e => e.id === extendsConn.to) : null;
+
+    let bases = [];
+    if (isAbstract || isInterface) bases.push('ABC');
+    else if (parentEl)             bases.push(parentEl.name);
+
+    let code = '';
+
+    // ── Class declaration ──────────────────────────────────
+    code += `class ${element.name}`;
+    if (bases.length) code += `(${bases.join(', ')})`;
+    code += ':\n';
+
+    code += '    """\n';
+    code += `    ${isInterface ? 'Interface' : isAbstract ? 'Abstract class' : 'Class'}: ${element.name}\n`;
+    code += '    Auto-generated from UML diagram.\n';
+    code += '    """\n\n';
+
+    const attrs   = element.attributes || [];
+    const methods = element.methods    || [];
+
+    // ── __init__ ───────────────────────────────────────────
+    const initAttrs = attrs.filter(a => !a.isStatic);
+
+    if (initAttrs.length > 0) {
+      // Build typed signature
+      const paramParts = initAttrs.map(a => {
+        const pyType = CodeGenerator.mapType(a.type || 'Object', 'Python');
+        const defVal = CodeGenerator.getDefaultValue(pyType, 'Python');
+        return `${a.name}: ${pyType} = ${defVal}`;
+      });
+      code += `    def __init__(self, ${paramParts.join(', ')}) -> None:\n`;
+    } else {
+      code += '    def __init__(self) -> None:\n';
+    }
+
+    if (parentEl) code += '        super().__init__()\n';
+
+    if (initAttrs.length > 0) {
+      initAttrs.forEach(a => {
+        const pyType = CodeGenerator.mapType(a.type || 'Object', 'Python');
+        code += `        self.${a.name}: ${pyType} = ${a.name}\n`;
+      });
+    } else {
+      code += '        pass\n';
+    }
+
+    // Relationship fields inside __init__
+    const relFields = this.buildPythonRelationshipFields(element, connections, allElements);
+    if (relFields) code += relFields;
+
+    code += '\n';
+
+    // ── Abstract / concrete methods ────────────────────────
+    methods.forEach(m => {
+      const retType = CodeGenerator.mapType(m.returnType || 'None', 'Python');
+      const params  = this.buildPythonParams(m.parameters);
+      const paramStr = params ? `, ${params}` : '';
+
+      if (isInterface || isAbstract || m.isAbstract) {
+        code += '    @abstractmethod\n';
+        code += `    def ${m.name}(self${paramStr}) -> ${retType}:\n`;
+        code += `        """Abstract: ${m.name}"""\n`;
+        code += '        ...\n\n';
+      } else {
+        code += `    def ${m.name}(self${paramStr}) -> ${retType}:\n`;
+        code += `        """${m.name} — implement logic here."""\n`;
+        if (retType === 'None' || retType === 'none') {
+          code += '        pass\n\n';
+        } else {
+          const defVal = CodeGenerator.getDefaultValue(retType, 'Python');
+          code += `        return ${defVal}\n\n`;
         }
       }
     });
-    
-    return attributes;
+
+    // ── __repr__ ───────────────────────────────────────────
+    if (!isInterface) {
+      code += '    def __repr__(self) -> str:\n';
+      if (initAttrs.length > 0) {
+        const parts = initAttrs.map(a => `${a.name}={self.${a.name}!r}`).join(', ');
+        code += `        return f"${element.name}(${parts})"\n`;
+      } else {
+        code += `        return f"${element.name}()"\n`;
+      }
+      code += '\n';
+    }
+
+    return code;
   }
 
-  static pluralize(word) {
-    if (word.endsWith('s')) return word + 'es';
-    if (word.endsWith('y')) return word.slice(0, -1) + 'ies';
-    return word + 's';
+  /**
+   * Strip Java/C-style type prefixes for Python params.
+   * "double amount, String name" → "amount, name"
+   */
+  static buildPythonParams(parameters) {
+    if (!parameters) return '';
+    if (Array.isArray(parameters)) {
+      return parameters
+        .map(p => {
+          if (typeof p === 'string') return CodeGenerator.stripTypePrefix(p);
+          const t = CodeGenerator.mapType(p.type || 'Any', 'Python');
+          return `${p.name || 'param'}: ${t}`;
+        })
+        .join(', ');
+    }
+    if (typeof parameters === 'string' && parameters.trim()) {
+      return parameters.split(',')
+        .map(p => CodeGenerator.stripTypePrefix(p.trim()))
+        .filter(Boolean)
+        .join(', ');
+    }
+    return '';
   }
 
-  // ============================================================
-  // USE CASE DIAGRAM CODE GENERATION
-  // ============================================================
+  /**
+   * Strip a leading Java/C-style type word from "type name" → "name".
+   * "double amount" → "amount", "String name" → "name"
+   */
+  static stripTypePrefix(param) {
+    if (!param) return '';
+    const parts = param.trim().split(/\s+/);
+    const primitives = new Set(['int','double','float','boolean','long','char','byte','short',
+                                 'string','number','any','void','object']);
+    if (parts.length >= 2) {
+      const first = parts[0];
+      if (primitives.has(first.toLowerCase()) || /^[A-Z]/.test(first)) {
+        return parts.slice(1).join(' ');
+      }
+    }
+    return param.trim();
+  }
+
+  static buildPythonRelationshipFields(element, connections, allElements) {
+    let out = '';
+    connections
+      .filter(c => c.from === element.id &&
+                   ['composition','aggregation','association'].includes(c.type))
+      .forEach(c => {
+        const target = allElements.find(e => e.id === c.to);
+        if (!target) return;
+        const many = (c.toMultiplicity || c.multiplicity || '1').includes('*');
+        const fieldName = many
+          ? this.pluralize(target.name.toLowerCase())
+          : target.name.toLowerCase();
+        const typeHint = many ? `List[${target.name}]` : `Optional[${target.name}]`;
+        const defVal   = many ? '[]' : 'None';
+        out += `        self.${fieldName}: ${typeHint} = ${defVal}\n`;
+      });
+    return out;
+  }
+
+  // ─────────────────────────────────────────────────────────
+  // JAVASCRIPT CODE GENERATION
+  // ─────────────────────────────────────────────────────────
+
+  static generateJavaScriptCode(elements, connections) {
+    const classEls = elements.filter(e => ['class','interface','abstract'].includes(e.type));
+    if (classEls.length === 0) return '// No classes to generate\n';
+
+    let code = '// Auto-generated from UML Class Diagram\n// ES2022 module — run with Node.js 18+\n\n';
+
+    const ordered = this.topoSort(classEls, connections);
+    ordered.forEach(el => {
+      code += this.buildJavaScriptClass(el, connections, classEls);
+      code += '\n\n';
+    });
+
+    // Demo block
+    code += '// ── Demo (Node.js) ──────────────────────────────────────────\n';
+    code += '// Uncomment and run: node <filename>.js\n';
+    ordered.filter(e => e.type === 'class').forEach(el => {
+      const varName = el.name.charAt(0).toLowerCase() + el.name.slice(1);
+      code += `// const ${varName} = new ${el.name}();\n`;
+      code += `// console.log(${varName}.toString());\n`;
+    });
+
+    return code;
+  }
+
+  static buildJavaScriptClass(element, connections, allElements) {
+    const isInterface = element.type === 'interface';
+    const isAbstract  = element.type === 'abstract';
+
+    const extendsConn = connections.find(c => c.from === element.id && c.type === 'inheritance');
+    const parentEl    = extendsConn ? allElements.find(e => e.id === extendsConn.to) : null;
+
+    const attrs   = element.attributes || [];
+    const methods = element.methods    || [];
+
+    let code = '';
+
+    // ── JSDoc ──────────────────────────────────────────────
+    code += '/**\n';
+    code += ` * @class ${element.name}\n`;
+    if (isAbstract)  code += ' * @abstract\n';
+    if (isInterface) code += ' * @interface\n';
+    if (parentEl)    code += ` * @extends ${parentEl.name}\n`;
+    attrs.forEach(a => {
+      const jsType = CodeGenerator.mapType(a.type || 'any', 'JavaScript');
+      code += ` * @property {${jsType}} ${a.name}\n`;
+    });
+    code += ' */\n';
+
+    // ── Class declaration ──────────────────────────────────
+    code += `class ${element.name}`;
+    if (parentEl) code += ` extends ${parentEl.name}`;
+    code += ' {\n\n';
+
+    // ── Constructor ────────────────────────────────────────
+    if (attrs.length > 0) {
+      const initAttrs = attrs.filter(a => !a.isStatic);
+      const params = initAttrs.map(a => a.name).join(', ');
+      const hasDefaults = initAttrs.length > 0;
+
+      if (hasDefaults) {
+        const paramWithDefaults = initAttrs.map(a => {
+          const jsType = CodeGenerator.mapType(a.type || 'any', 'JavaScript');
+          const defVal = CodeGenerator.getDefaultValue(jsType, 'JavaScript') || 'null';
+          return `${a.name} = ${defVal}`;
+        }).join(', ');
+        code += `    constructor(${paramWithDefaults}) {\n`;
+      } else {
+        code += '    constructor() {\n';
+      }
+
+      if (parentEl) code += '        super();\n';
+
+      if (isAbstract) {
+        code += `        if (new.target === ${element.name}) {\n`;
+        code += `            throw new Error('Cannot instantiate abstract class ${element.name}');\n`;
+        code += '        }\n';
+      }
+
+      initAttrs.forEach(a => {
+        code += `        /** @type {${CodeGenerator.mapType(a.type || 'any', 'JavaScript')}} */\n`;
+        code += `        this.${a.name} = ${a.name};\n`;
+      });
+    } else {
+      code += '    constructor() {\n';
+      if (parentEl) code += '        super();\n';
+      if (isAbstract) {
+        code += `        if (new.target === ${element.name}) {\n`;
+        code += `            throw new Error('Cannot instantiate abstract class ${element.name}');\n`;
+        code += '        }\n';
+      }
+    }
+
+    // Relationship fields
+    const relFields = this.buildJavaScriptRelationshipFields(element, connections, allElements);
+    if (relFields) code += relFields;
+
+    code += '    }\n\n';
+
+    // ── Methods ────────────────────────────────────────────
+    methods.forEach(m => {
+      const retType  = CodeGenerator.mapType(m.returnType || 'void', 'JavaScript');
+      const params   = this.buildJavaScriptParams(m.parameters);
+      const isStaticM = m.isStatic ? 'static ' : '';
+
+      code += `    /**\n     * @returns {${retType}}\n     */\n`;
+      code += `    ${isStaticM}${m.name}(${params}) {\n`;
+
+      if (isInterface) {
+        code += `        throw new Error('${m.name}() must be implemented by subclass');\n`;
+      } else if (m.isAbstract) {
+        code += `        throw new Error('Abstract method ${m.name}() must be overridden');\n`;
+      } else if (retType !== 'void') {
+        const defVal = CodeGenerator.getDefaultValue(retType, 'JavaScript') || 'null';
+        code += `        return ${defVal};\n`;
+      }
+      code += '    }\n\n';
+    });
+
+    // ── Getters / Setters ──────────────────────────────────
+    if (attrs.length > 0) {
+      const existingMethods = new Set(methods.map(m => m.name.toLowerCase()));
+      const instanceAttrs = attrs.filter(a => !a.isStatic);
+      instanceAttrs.forEach(a => {
+        const cap = a.name.charAt(0).toUpperCase() + a.name.slice(1);
+        if (!existingMethods.has(`get${cap}`.toLowerCase())) {
+          code += `    get${cap}() { return this.${a.name}; }\n`;
+        }
+        if (!a.isFinal && !existingMethods.has(`set${cap}`.toLowerCase())) {
+          code += `    set${cap}(value) { this.${a.name} = value; }\n`;
+        }
+        code += '\n';
+      });
+    }
+
+    // ── toString ───────────────────────────────────────────
+    if (!isInterface) {
+      code += '    toString() {\n';
+      if (attrs.length > 0) {
+        const parts = attrs
+          .filter(a => !a.isStatic)
+          .map(a => `${a.name}: \${this.${a.name}}`)
+          .join(', ');
+        code += `        return \`${element.name} { ${parts} }\`;\n`;
+      } else {
+        code += `        return '${element.name}';\n`;
+      }
+      code += '    }\n\n';
+    }
+
+    code += '}\n\n';
+    code += `export default ${element.name};`;
+    return code;
+  }
+
+  static buildJavaScriptParams(parameters) {
+    if (!parameters) return '';
+    if (Array.isArray(parameters)) {
+      return parameters
+        .map(p => (typeof p === 'string'
+          ? CodeGenerator.stripTypePrefix(p)
+          : (p.name || 'param')))
+        .join(', ');
+    }
+    if (typeof parameters === 'string' && parameters.trim()) {
+      return parameters.split(',')
+        .map(p => CodeGenerator.stripTypePrefix(p.trim()))
+        .filter(Boolean)
+        .join(', ');
+    }
+    return '';
+  }
+
+  static buildJavaScriptRelationshipFields(element, connections, allElements) {
+    let out = '';
+    connections
+      .filter(c => c.from === element.id &&
+                   ['composition','aggregation','association'].includes(c.type))
+      .forEach(c => {
+        const target = allElements.find(e => e.id === c.to);
+        if (!target) return;
+        const many = (c.toMultiplicity || c.multiplicity || '1').includes('*');
+        if (many) {
+          out += `        /** @type {${target.name}[]} */\n`;
+          out += `        this.${this.pluralize(target.name.toLowerCase())} = [];\n`;
+        } else {
+          out += `        /** @type {${target.name}|null} */\n`;
+          out += `        this.${target.name.toLowerCase()} = null;\n`;
+        }
+      });
+    return out;
+  }
+
+  // ─────────────────────────────────────────────────────────
+  // USE-CASE DIAGRAM
+  // ─────────────────────────────────────────────────────────
 
   static generateUseCaseDiagramCode(elements, connections, language) {
-    // Generate test cases and documentation for use cases
     let code = '';
-    
-    code += '/**\n';
-    code += ' * Use Case Diagram Implementation\n';
-    code += ' * Generated from UML Use Case Diagram\n';
-    code += ' */\n\n';
-    
-    // Generate use case handler class
     code += this.generateUseCaseHandler(elements, connections, language);
-    
     return code;
   }
 
   static generateUseCaseHandler(elements, connections, language) {
+    const usecases = elements.filter(e => e.type === 'usecase');
+    if (usecases.length === 0) {
+      return language === 'Python'
+        ? '# No use cases defined\npass\n'
+        : '// No use cases defined\n';
+    }
+
     let code = '';
-    
+
     if (language === 'Java') {
       code += 'package com.example.usecases;\n\n';
+      code += '/**\n * Auto-generated Use Case Handler.\n */\n';
       code += 'public class UseCaseHandler {\n\n';
-      
-      elements.forEach(element => {
-        if (element.type === 'usecase') {
-          const methodName = this.normalizeIdentifier(element.name, 'method');
-          code += `    public void execute${methodName.charAt(0).toUpperCase() + methodName.slice(1)}() {\n`;
-          code += `        // Implement use case: ${element.name}\n`;
-          code += '        // TODO: Add implementation\n';
-          code += '    }\n\n';
-        }
+      usecases.forEach(uc => {
+        const m  = this.normalizeIdentifier(uc.name, 'method');
+        const mC = m.charAt(0).toUpperCase() + m.slice(1);
+        code += `    /**\n     * Execute use case: ${uc.name}\n     */\n`;
+        code += `    public boolean execute${mC}() {\n`;
+        code += `        // TODO: implement "${uc.name}"\n`;
+        code += '        return true;\n';
+        code += '    }\n\n';
       });
-      
-      code += '}';
+      code += '    // ── Entry point ───────────────────────────────────\n';
+      code += '    public static void main(String[] args) {\n';
+      code += '        UseCaseHandler handler = new UseCaseHandler();\n';
+      usecases.forEach(uc => {
+        const m  = this.normalizeIdentifier(uc.name, 'method');
+        const mC = m.charAt(0).toUpperCase() + m.slice(1);
+        code += `        System.out.println("${uc.name}: " + handler.execute${mC}());\n`;
+      });
+      code += '    }\n';
+      code += '}\n';
+
     } else if (language === 'Python') {
       code += 'class UseCaseHandler:\n';
-      code += '    """Handle use case operations"""\n\n';
-      
-      elements.forEach(element => {
-        if (element.type === 'usecase') {
-          const methodName = this.normalizeIdentifier(element.name, 'method');
-          code += `    def execute_${methodName}(self):\n`;
-          code += `        """Execute use case: ${element.name}"""\n`;
-          code += '        # TODO: Add implementation\n';
-          code += '        pass\n\n';
-        }
+      code += '    """Auto-generated Use Case Handler."""\n\n';
+      usecases.forEach(uc => {
+        const m = this.normalizeIdentifier(uc.name, 'method');
+        code += `    def execute_${m}(self) -> bool:\n`;
+        code += `        """Execute use case: ${uc.name}\"\"\"\n`;
+        code += `        # TODO: implement "${uc.name}"\n`;
+        code += '        return True\n\n';
       });
+      code += '\nif __name__ == "__main__":\n';
+      code += '    handler = UseCaseHandler()\n';
+      usecases.forEach(uc => {
+        const m = this.normalizeIdentifier(uc.name, 'method');
+        code += `    print("${uc.name}:", handler.execute_${m}())\n`;
+      });
+
     } else if (language === 'JavaScript') {
+      code += '/**\n * Auto-generated Use Case Handler.\n */\n';
       code += 'class UseCaseHandler {\n\n';
-      
-      elements.forEach(element => {
-        if (element.type === 'usecase') {
-          const methodName = this.normalizeIdentifier(element.name, 'method');
-          code += `    execute${methodName.charAt(0).toUpperCase() + methodName.slice(1)}() {\n`;
-          code += `        // Implement use case: ${element.name}\n`;
-          code += '        // TODO: Add implementation\n';
-          code += '    }\n\n';
-        }
+      usecases.forEach(uc => {
+        const m  = this.normalizeIdentifier(uc.name, 'method');
+        const mC = m.charAt(0).toUpperCase() + m.slice(1);
+        code += `    /** Execute use case: ${uc.name} */\n`;
+        code += `    execute${mC}() {\n`;
+        code += `        // TODO: implement "${uc.name}"\n`;
+        code += '        return true;\n';
+        code += '    }\n\n';
       });
-      
-      code += '}\n\nexport default UseCaseHandler;';
+      code += '}\n\n';
+      code += 'export default UseCaseHandler;\n\n';
+      code += '// ── Demo ──────────────────────────────────────────────\n';
+      code += '// const h = new UseCaseHandler();\n';
+      usecases.forEach(uc => {
+        const m  = this.normalizeIdentifier(uc.name, 'method');
+        const mC = m.charAt(0).toUpperCase() + m.slice(1);
+        code += `// console.log("${uc.name}:", h.execute${mC}());\n`;
+      });
     }
-    
+
     return code;
   }
 
   static generateUseCaseDocumentation(elements, connections) {
     let doc = '# Use Case Diagram Documentation\n\n';
-    
     doc += '## Actors\n\n';
     elements.filter(e => e.type === 'actor').forEach(actor => {
-      doc += `### ${actor.name}\n`;
-      doc += `- **Description**: Actor in the system\n`;
-      doc += `- **Associated Use Cases**: `;
-      
-      const useCases = connections
+      const ucNames = connections
         .filter(c => c.from === actor.id || c.to === actor.id)
         .map(c => {
-          const useCaseId = c.from === actor.id ? c.to : c.from;
-          const useCase = elements.find(e => e.id === useCaseId);
-          return useCase ? useCase.name : '';
+          const ucId = c.from === actor.id ? c.to : c.from;
+          return elements.find(e => e.id === ucId)?.name || '';
         })
-        .filter(name => name);
-      
-      doc += useCases.join(', ') + '\n\n';
+        .filter(Boolean);
+      doc += `### ${actor.name}\n- **Use Cases**: ${ucNames.join(', ') || 'none'}\n\n`;
     });
-    
     doc += '## Use Cases\n\n';
-    elements.filter(e => e.type === 'usecase').forEach(usecase => {
-      doc += `### ${usecase.name}\n`;
-      doc += `- **Description**: ${usecase.description || 'No description provided'}\n`;
-      doc += `- **Actors**: `;
-      
-      const actors = connections
-        .filter(c => c.from === usecase.id || c.to === usecase.id)
+    elements.filter(e => e.type === 'usecase').forEach(uc => {
+      doc += `### ${uc.name}\n`;
+      doc += `- **Description**: ${uc.description || 'No description provided'}\n`;
+      const actorNames = connections
+        .filter(c => c.from === uc.id || c.to === uc.id)
         .map(c => {
-          const actorId = c.from === usecase.id ? c.to : c.from;
-          const actor = elements.find(e => e.id === actorId && e.type === 'actor');
-          return actor ? actor.name : '';
+          const actorId = c.from === uc.id ? c.to : c.from;
+          return elements.find(e => e.id === actorId && e.type === 'actor')?.name || '';
         })
-        .filter(name => name);
-      
-      doc += actors.join(', ') + '\n\n';
+        .filter(Boolean);
+      doc += `- **Actors**: ${actorNames.join(', ') || 'none'}\n\n`;
     });
-    
     return doc;
   }
 
-  static generateUseCaseTests(elements, connections, language) {
-    let code = '';
-    
-    if (language === 'Java') {
-      code += 'package com.example.usecases;\n\n';
-      code += 'import org.junit.Test;\n';
-      code += 'import static org.junit.Assert.*;\n\n';
-      code += 'public class UseCaseTests {\n\n';
-      
-      elements.filter(e => e.type === 'usecase').forEach(usecase => {
-        const methodName = this.normalizeIdentifier(usecase.name, 'method');
-        code += `    @Test\n`;
-        code += `    public void test${methodName.charAt(0).toUpperCase() + methodName.slice(1)}() {\n`;
-        code += `        // Test use case: ${usecase.name}\n`;
-        code += '        // TODO: Add test implementation\n';
-        code += '    }\n\n';
-      });
-      
-      code += '}';
-    } else if (language === 'Python') {
-      code += 'import unittest\n\n';
-      code += 'class UseCaseTests(unittest.TestCase):\n';
-      code += '    """Test use case operations"""\n\n';
-      
-      elements.filter(e => e.type === 'usecase').forEach(usecase => {
-        const methodName = this.normalizeIdentifier(usecase.name, 'method');
-        code += `    def test_${methodName}(self):\n`;
-        code += `        """Test use case: ${usecase.name}"""\n`;
-        code += '        # TODO: Add test implementation\n';
-        code += '        pass\n\n';
-      });
-    } else if (language === 'JavaScript') {
-      code += "const { expect } = require('chai');\n\n";
-      code += 'describe("Use Case Tests", () => {\n\n';
-      
-      elements.filter(e => e.type === 'usecase').forEach(usecase => {
-        const methodName = this.normalizeIdentifier(usecase.name, 'method');
-        code += `    it("should execute ${usecase.name}", () => {\n`;
-        code += '        // TODO: Add test implementation\n';
-        code += '    });\n\n';
-      });
-      
-      code += '});';
-    }
-    
-    return code;
-  }
-
-  // ============================================================
-  // SEQUENCE DIAGRAM CODE GENERATION
-  // ============================================================
+  // ─────────────────────────────────────────────────────────
+  // SEQUENCE DIAGRAM
+  // ─────────────────────────────────────────────────────────
 
   static generateSequenceDiagramCode(elements, connections, language) {
-    let code = '';
-    
-    code += '/**\n';
-    code += ' * Sequence Diagram Implementation\n';
-    code += ' * Generated from UML Sequence Diagram\n';
-    code += ' */\n\n';
-    
-    code += this.generateSequenceHandler(elements, connections, language);
-    
-    return code;
+    return this.generateSequenceCode(elements, connections, language);
   }
 
-  static generateSequenceHandler(elements, connections, language) {
+  static generateSequenceCode(elements, connections, language) {
+    const lifelines = elements.filter(e => e.type === 'lifeline');
+    if (lifelines.length === 0) {
+      return language === 'Python' ? '# No lifelines defined\npass\n' : '// No lifelines defined\n';
+    }
+
     let code = '';
-    
+
     if (language === 'Java') {
       code += 'package com.example.sequences;\n\n';
+      code += '/**\n * Auto-generated Sequence Handler.\n */\n';
       code += 'public class SequenceHandler {\n\n';
-      
-      // Group messages by lifeline
-      const lifelines = elements.filter(e => e.type === 'lifeline');
-      
-      lifelines.forEach(lifeline => {
-        const messages = connections.filter(c => c.from === lifeline.id);
-        
-        if (messages.length > 0) {
-          code += `    // Interactions for ${lifeline.name}\n`;
-          messages.forEach(msg => {
-            const methodName = this.normalizeIdentifier(msg.label || 'interaction', 'method');
-            code += `    public void ${methodName}() {\n`;
-            code += `        // Message: ${msg.label || 'No label'}\n`;
-            code += '        // TODO: Implement interaction\n';
-            code += '    }\n\n';
-          });
-        }
+      lifelines.forEach(ll => {
+        const msgs = connections.filter(c => c.from === ll.id);
+        msgs.forEach(msg => {
+          const mName = this.normalizeIdentifier(msg.label || 'interact', 'method');
+          const toEl  = elements.find(e => e.id === msg.to);
+          code += `    /** Message from ${ll.name} → ${toEl?.name || '?'}: ${msg.label || ''} */\n`;
+          code += `    public void ${mName}() {\n`;
+          code += `        System.out.println("${ll.name} → ${toEl?.name || '?'}: ${msg.label || mName}");\n`;
+          code += '    }\n\n';
+        });
       });
-      
-      code += '}';
+      // main that runs all messages in order
+      code += '    public static void main(String[] args) {\n';
+      code += '        SequenceHandler seq = new SequenceHandler();\n';
+      lifelines.forEach(ll => {
+        const msgs = connections.filter(c => c.from === ll.id);
+        msgs.forEach(msg => {
+          const mName = this.normalizeIdentifier(msg.label || 'interact', 'method');
+          code += `        seq.${mName}();\n`;
+        });
+      });
+      code += '    }\n';
+      code += '}\n';
+
     } else if (language === 'Python') {
       code += 'class SequenceHandler:\n';
-      code += '    """Handle sequence interactions"""\n\n';
-      
-      const lifelines = elements.filter(e => e.type === 'lifeline');
-      
-      lifelines.forEach(lifeline => {
-        const messages = connections.filter(c => c.from === lifeline.id);
-        
-        if (messages.length > 0) {
-          messages.forEach(msg => {
-            const methodName = this.normalizeIdentifier(msg.label || 'interaction', 'method');
-            code += `    def ${methodName}(self):\n`;
-            code += `        """Message: ${msg.label || 'No label'}"""\n`;
-            code += '        # TODO: Implement interaction\n';
-            code += '        pass\n\n';
-          });
-        }
+      code += '    """Auto-generated Sequence Handler."""\n\n';
+      lifelines.forEach(ll => {
+        const msgs = connections.filter(c => c.from === ll.id);
+        msgs.forEach(msg => {
+          const mName = this.normalizeIdentifier(msg.label || 'interact', 'method');
+          const toEl  = elements.find(e => e.id === msg.to);
+          code += `    def ${mName}(self) -> None:\n`;
+          code += `        """Message from ${ll.name} to ${toEl?.name || '?'}"""\n`;
+          code += `        print(f"${ll.name} → ${toEl?.name || '?'}: ${msg.label || mName}")\n\n`;
+        });
       });
+      code += '\nif __name__ == "__main__":\n';
+      code += '    seq = SequenceHandler()\n';
+      lifelines.forEach(ll => {
+        connections.filter(c => c.from === ll.id).forEach(msg => {
+          const mName = this.normalizeIdentifier(msg.label || 'interact', 'method');
+          code += `    seq.${mName}()\n`;
+        });
+      });
+
     } else if (language === 'JavaScript') {
+      code += '/** Auto-generated Sequence Handler. */\n';
       code += 'class SequenceHandler {\n\n';
-      
-      const lifelines = elements.filter(e => e.type === 'lifeline');
-      
-      lifelines.forEach(lifeline => {
-        const messages = connections.filter(c => c.from === lifeline.id);
-        
-        if (messages.length > 0) {
-          messages.forEach(msg => {
-            const methodName = this.normalizeIdentifier(msg.label || 'interaction', 'method');
-            code += `    ${methodName}() {\n`;
-            code += `        // Message: ${msg.label || 'No label'}\n`;
-            code += '        // TODO: Implement interaction\n';
-            code += '    }\n\n';
-          });
-        }
+      lifelines.forEach(ll => {
+        const msgs = connections.filter(c => c.from === ll.id);
+        msgs.forEach(msg => {
+          const mName = this.normalizeIdentifier(msg.label || 'interact', 'method');
+          const toEl  = elements.find(e => e.id === msg.to);
+          code += `    /** ${ll.name} → ${toEl?.name || '?'}: ${msg.label || ''} */\n`;
+          code += `    ${mName}() {\n`;
+          code += `        console.log("${ll.name} → ${toEl?.name || '?'}: ${msg.label || mName}");\n`;
+          code += '    }\n\n';
+        });
       });
-      
-      code += '}\n\nexport default SequenceHandler;';
+      code += '}\n\n';
+      code += 'export default SequenceHandler;\n\n';
+      code += '// ── Demo ──────────────────────────────────────────────\n';
+      code += '// const seq = new SequenceHandler();\n';
+      lifelines.forEach(ll => {
+        connections.filter(c => c.from === ll.id).forEach(msg => {
+          const mName = this.normalizeIdentifier(msg.label || 'interact', 'method');
+          code += `// seq.${mName}();\n`;
+        });
+      });
     }
-    
+
     return code;
   }
 
   static generateSequenceDocumentation(elements, connections) {
-    let doc = '# Sequence Diagram Documentation\n\n';
-    
-    doc += '## Participants\n\n';
-    elements.filter(e => e.type === 'lifeline').forEach(lifeline => {
-      doc += `### ${lifeline.name}\n`;
-      doc += `- **Type**: Participant/Lifeline\n`;
-      
-      const outgoing = connections.filter(c => c.from === lifeline.id);
-      const incoming = connections.filter(c => c.to === lifeline.id);
-      
-      if (outgoing.length > 0) {
-        doc += `- **Outgoing Messages**: ${outgoing.map(c => c.label || 'unnamed').join(', ')}\n`;
-      }
-      if (incoming.length > 0) {
-        doc += `- **Incoming Messages**: ${incoming.map(c => c.label || 'unnamed').join(', ')}\n`;
-      }
+    let doc = '# Sequence Diagram Documentation\n\n## Participants\n\n';
+    elements.filter(e => e.type === 'lifeline').forEach(ll => {
+      doc += `### ${ll.name}\n`;
+      const out = connections.filter(c => c.from === ll.id);
+      const inn = connections.filter(c => c.to === ll.id);
+      if (out.length) doc += `- **Sends**: ${out.map(c => c.label || 'message').join(', ')}\n`;
+      if (inn.length) doc += `- **Receives**: ${inn.map(c => c.label || 'message').join(', ')}\n`;
       doc += '\n';
     });
-    
     doc += '## Message Flow\n\n';
-    connections.forEach((conn, idx) => {
-      const source = elements.find(e => e.id === conn.from);
-      const target = elements.find(e => e.id === conn.to);
-      
-      doc += `${idx + 1}. **${source?.name || 'Unknown'}** → **${target?.name || 'Unknown'}**: ${conn.label || 'No label'}\n`;
+    connections.forEach((c, i) => {
+      const src = elements.find(e => e.id === c.from);
+      const tgt = elements.find(e => e.id === c.to);
+      doc += `${i + 1}. **${src?.name || '?'}** → **${tgt?.name || '?'}**: ${c.label || 'no label'}\n`;
     });
-    
     return doc;
   }
 
-  // ============================================================
-  // CODE FORMATTING AND UTILITIES
-  // ============================================================
+  // ─────────────────────────────────────────────────────────
+  // HELPERS
+  // ─────────────────────────────────────────────────────────
 
-  static formatCode(code, language) {
-    // Remove duplicate empty lines
-    let formatted = code.replace(/\n\s*\n\s*\n/g, '\n\n');
-    
-    // Remove trailing whitespace
-    formatted = formatted.split('\n').map(line => line.trimEnd()).join('\n');
-    
-    // Ensure single newline at end
-    formatted = formatted.trim() + '\n';
-    
-    return formatted;
+  /** Topological sort so parent classes are emitted before children */
+  static topoSort(elements, connections) {
+    const visited = new Set();
+    const result  = [];
+
+    const visit = (el) => {
+      if (visited.has(el.id)) return;
+      visited.add(el.id);
+      // Visit parent first
+      const parentConn = connections.find(c => c.from === el.id && c.type === 'inheritance');
+      if (parentConn) {
+        const parent = elements.find(e => e.id === parentConn.to);
+        if (parent) visit(parent);
+      }
+      result.push(el);
+    };
+
+    elements.forEach(el => visit(el));
+    return result;
   }
 
-  /**
-   * Generate multiple files for complex projects
-   */
-  static generateMultiFileCode(elements, connections = [], language = 'Java', diagramType = 'class') {
-    return this.splitIntoFiles(elements, connections, language, diagramType);
-  }
-
-  /**
-   * Split code generation into multiple files
-   */
-  static splitIntoFiles(elements, connections = [], language = 'Java', diagramType = 'class') {
-    const files = [];
-    
-    if (diagramType === 'class') {
-      // Generate one file per class element
-      elements.filter(el => el.type === 'class' || el.type === 'interface' || el.type === 'abstract').forEach(element => {
-        const fileName = this.getFileName(element.name, language);
-        const fileContent = this.generateSingleClass(element, connections, elements, language);
-        files.push({ filename: fileName, content: fileContent });
-      });
-    } else if (diagramType === 'usecase') {
-      // Generate documentation and test files
-      files.push({
-        filename: 'UseCases.md',
-        content: this.generateUseCaseDocumentation(elements, connections)
-      });
-      files.push({
-        filename: this.getFileName('UseCaseTests', language),
-        content: this.generateUseCaseTests(elements, connections, language)
-      });
-    } else if (diagramType === 'sequence') {
-      // Generate interaction flow documentation and code
-      files.push({
-        filename: 'SequenceFlow.md',
-        content: this.generateSequenceDocumentation(elements, connections)
-      });
-      files.push({
-        filename: this.getFileName('InteractionHandler', language),
-        content: this.generateSequenceCode(elements, connections, language)
-      });
-    }
-    
-    return files.length > 0 ? files : [{ filename: 'Generated.txt', content: 'No content to generate' }];
+  static pluralize(word) {
+    if (!word) return 'items';
+    if (word.endsWith('s') || word.endsWith('x') || word.endsWith('z')) return word + 'es';
+    if (word.endsWith('y') && !/[aeiou]y$/.test(word))                   return word.slice(0, -1) + 'ies';
+    return word + 's';
   }
 
   static getFileName(className, language) {
     switch (language) {
-      case 'Java':
-        return `${className}.java`;
-      case 'Python':
-        return `${className.toLowerCase()}.py`;
-      case 'JavaScript':
-        return `${className}.js`;
-      default:
-        return `${className}.txt`;
+      case 'Java':       return `${className}.java`;
+      case 'Python':     return `${this.toSnakeCase(className)}.py`;
+      case 'JavaScript': return `${className}.js`;
+      default:           return `${className}.txt`;
     }
+  }
+
+  static toSnakeCase(name) {
+    return name
+      .replace(/([A-Z])/g, '_$1')
+      .toLowerCase()
+      .replace(/^_/, '');
+  }
+
+  static formatCode(code, language) {
+    let out = code.replace(/\n{3,}/g, '\n\n');
+    out = out.split('\n').map(l => l.trimEnd()).join('\n');
+    return out.trim() + '\n';
   }
 }
 
