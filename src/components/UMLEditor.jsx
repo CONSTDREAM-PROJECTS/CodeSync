@@ -562,6 +562,7 @@ const UMLEditor = () => {
           onRedo={redo}
           canUndo={canUndo}
           canRedo={canRedo}
+          selectedDiagram={selectedDiagram}
         />
 
         {/* Tool Palette */}

@@ -20,15 +20,30 @@ const DiagramToolbar = ({
   canRedo,
   selectedDiagram = 'class'
 }) => {
-  // Determine if current diagram supports code import/export
+  // "Code to Diagram" import — only meaningful for class diagrams
   const supportsCodeImport = selectedDiagram === 'class';
-  const supportsCodeGeneration = true; // All diagrams can generate some form of code/documentation
-  
+
+  // Language selector — only class diagrams produce language-specific code
+  const supportsLanguageSelect = selectedDiagram === 'class';
+
+  // Button label + tooltip per diagram type
+  const generateButtonLabel = selectedDiagram === 'class'
+    ? 'Generate Code'
+    : selectedDiagram === 'usecase'
+    ? 'Generate Docs'
+    : 'Generate Docs';
+
+  const generateButtonTitle = selectedDiagram === 'class'
+    ? 'Generate source code from class diagram'
+    : selectedDiagram === 'usecase'
+    ? 'Generate use case documentation'
+    : 'Generate sequence flow documentation';
+
   return (
     <div className="p-3 flex items-center justify-between" style={{ background: 'var(--panel-2)', borderBottom: '1px solid rgba(255,255,255,0.03)' }}>
       <div className="flex items-center space-x-2">
-        {/* Language Selector - only show for diagrams that support code generation */}
-        {supportsCodeGeneration && (
+        {/* Language Selector — class diagram only */}
+        {supportsLanguageSelect && (
           <select
             value={language}
             onChange={(e) => setLanguage(e.target.value)}
@@ -103,37 +118,27 @@ const DiagramToolbar = ({
       </div>
 
       <div className="flex items-center space-x-2">
-        {/* Code to Diagram - Only for Class Diagram */}
+        {/* Code to Diagram — Class Diagram only */}
         {supportsCodeImport && (
           <button
             onClick={onCodeToUML}
             className="btn-primary px-4 py-1.5 rounded flex items-center space-x-2 transition-colors"
-            title="Import code and convert to UML diagram"
+            title="Import source code and convert to UML class diagram"
           >
             <FileCode size={18} />
-            <span>Code to Diagram</span>
+            <span className="text-sm font-medium">Code to Diagram</span>
           </button>
         )}
-        
-        {/* Generate Code/Documentation - All diagrams */}
-        {supportsCodeGeneration && (
-          <button
-            onClick={onGenerateCode}
-            className="btn-primary px-4 py-1.5 rounded flex items-center space-x-2 transition-colors"
-            title={
-              selectedDiagram === 'class' 
-                ? 'Generate source code from diagram' 
-                : selectedDiagram === 'usecase'
-                ? 'Generate use case documentation and tests'
-                : 'Generate sequence flow documentation and code'
-            }
-          >
-            <Code size={18} />
-            <span className="text-sm font-medium">
-              {selectedDiagram === 'class' ? 'Generate Code' : 'Generate Documentation'}
-            </span>
-          </button>
-        )}
+
+        {/* Generate Code / Docs — all diagram types */}
+        <button
+          onClick={onGenerateCode}
+          className="btn-primary px-4 py-1.5 rounded flex items-center space-x-2 transition-colors"
+          title={generateButtonTitle}
+        >
+          <Code size={18} />
+          <span className="text-sm font-medium">{generateButtonLabel}</span>
+        </button>
       </div>
     </div>
   );

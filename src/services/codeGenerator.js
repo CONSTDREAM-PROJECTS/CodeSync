@@ -279,7 +279,7 @@ class CodeGenerator {
 
     // ── Field declarations ─────────────────────────────────
     if (attrs.length > 0) {
-      code += '    // ── Fields ──────────────────────────────────────────\n';
+      code += '    // Fields \n';
       attrs.forEach(a => {
         const vis   = a.visibility || 'private';
         const jType = CodeGenerator.mapType(a.type || 'Object', 'Java');
@@ -292,13 +292,13 @@ class CodeGenerator {
     // ── Relationship fields (composition / aggregation / association) ──
     const relFields = this.buildJavaRelationshipFields(element, connections, allElements);
     if (relFields) {
-      code += '    // ── Relationship fields ─────────────────────────────\n';
+      code += '    //  Relationship fields \n';
       code += relFields + '\n';
     }
 
     // ── Constructor ────────────────────────────────────────
     if (!isInterface) {
-      code += '    // ── Constructor ─────────────────────────────────────\n';
+      code += '    //  Constructor \n';
 
       // Collect all parameters that should go in the constructor
       const initAttrs = attrs.filter(a => !a.isStatic && !a.isFinal);
@@ -334,7 +334,7 @@ class CodeGenerator {
 
     // ── Methods ────────────────────────────────────────────
     if (methods.length > 0) {
-      code += '    // ── Methods ─────────────────────────────────────────\n';
+      code += '    // Methods\n';
       methods.forEach(m => {
         const vis      = m.visibility || 'public';
         const retType  = CodeGenerator.mapType(m.returnType || 'void', 'Java');
@@ -361,7 +361,7 @@ class CodeGenerator {
     // exists in the diagram (e.g. user declared getBalance() explicitly).
     if (attrs.length > 0 && !isInterface) {
       const existingNames = new Set(methods.map(m => m.name.toLowerCase()));
-      code += '    // ── Getters & Setters ───────────────────────────────\n';
+      code += '    // Getters & Setters \n';
       attrs.forEach(a => {
         const jType = CodeGenerator.mapType(a.type || 'Object', 'Java');
         const cap   = a.name.charAt(0).toUpperCase() + a.name.slice(1);
@@ -376,7 +376,7 @@ class CodeGenerator {
 
     // ── toString ───────────────────────────────────────────
     if (!isInterface && attrs.length > 0) {
-      code += '    // ── toString ────────────────────────────────────────\n';
+      code += '    //  toString \n';
       code += '    @Override\n    public String toString() {\n';
       const parts = attrs.map(a => `"${a.name}=" + ${a.name}`).join(' + ", " + ');
       code += `        return "${element.name}{" + ${parts} + "}";\n`;
@@ -448,7 +448,7 @@ class CodeGenerator {
     });
 
     // Demo block — lets the user just run `python file.py` and see output
-    code += '\n# ── Demo ────────────────────────────────────────────────────\n';
+    code += '\n# Demo \n';
     code += 'if __name__ == "__main__":\n';
     ordered.filter(e => e.type === 'class').forEach(el => {
       const varName = el.name.toLowerCase();
