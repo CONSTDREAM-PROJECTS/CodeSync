@@ -78,55 +78,55 @@ export const diagramTypes = [
 
 const CLASS_DIAGRAM_TOOLS = [
   // ── Mode controls ──────────────────────────────────────────
-  { id: 'select',        label: 'Select',         icon: '↖️' },
-  { id: 'delete',        label: 'Delete',          icon: '🗑️' },
+  { id: 'select',        label: 'Select',         icon: '↖️',  group: 'mode'     },
+  { id: 'delete',        label: 'Delete',          icon: '🗑️', group: 'mode'     },
 
   // ── Element types ──────────────────────────────────────────
-  { id: 'class',         label: 'Class',           icon: '📦' },
-  { id: 'interface',     label: 'Interface',       icon: '🔷' },
-  { id: 'abstract',      label: 'Abstract Class',  icon: '📐' },
-  { id: 'object',        label: 'Object',          icon: '🟦' },
-  { id: 'package',       label: 'Package',         icon: '📁' },
-  { id: 'component',     label: 'Component',       icon: '⚙️' },
+  { id: 'class',         label: 'Class',           icon: '📦',  group: 'element'  },
+  { id: 'interface',     label: 'Interface',       icon: '🔷',  group: 'element'  },
+  { id: 'abstract',      label: 'Abstract Class',  icon: '📐',  group: 'element'  },
+  { id: 'object',        label: 'Object',          icon: '🟦',  group: 'element'  },
+  { id: 'package',       label: 'Package',         icon: '📁',  group: 'element'  },
+  { id: 'component',     label: 'Component',       icon: '⚙️',  group: 'element'  },
 
   // ── Relationship types ─────────────────────────────────────
-  { id: 'association',   label: 'Association',     icon: '—' },
-  { id: 'inheritance',   label: 'Inheritance',     icon: '△' },
-  { id: 'aggregation',   label: 'Aggregation',     icon: '◇' },
-  { id: 'composition',   label: 'Composition',     icon: '◆' },
-  { id: 'dependency',    label: 'Dependency',      icon: '⤳' },
-  { id: 'realization',   label: 'Realization',     icon: '⇢' }
+  { id: 'association',   label: 'Association',     icon: '—',   group: 'relation' },
+  { id: 'inheritance',   label: 'Inheritance',     icon: '△',   group: 'relation' },
+  { id: 'aggregation',   label: 'Aggregation',     icon: '◇',   group: 'relation' },
+  { id: 'composition',   label: 'Composition',     icon: '◆',   group: 'relation' },
+  { id: 'dependency',    label: 'Dependency',      icon: '⤳',   group: 'relation' },
+  { id: 'realization',   label: 'Realization',     icon: '⇢',   group: 'relation' }
 ];
 
 const USE_CASE_DIAGRAM_TOOLS = [
   // ── Mode controls ──────────────────────────────────────────
-  { id: 'select',        label: 'Select',          icon: '↖️' },
-  { id: 'delete',        label: 'Delete',           icon: '🗑️' },
+  { id: 'select',        label: 'Select',          icon: '↖️',  group: 'mode'     },
+  { id: 'delete',        label: 'Delete',           icon: '🗑️', group: 'mode'     },
 
   // ── Element types ──────────────────────────────────────────
-  { id: 'actor',         label: 'Actor',            icon: '🧍' },
-  { id: 'usecase',       label: 'Use Case',         icon: '⭕' },
+  { id: 'actor',         label: 'Actor',            icon: '🧍',  group: 'element'  },
+  { id: 'usecase',       label: 'Use Case',         icon: '⭕',  group: 'element'  },
 
   // ── Relationship types ─────────────────────────────────────
-  { id: 'association',   label: 'Association',      icon: '—' },
-  { id: 'include',       label: '«include»',        icon: '⤵' },
-  { id: 'extend',        label: '«extend»',         icon: '⤴' },
-  { id: 'generalization',label: 'Generalization',   icon: '△' }
+  { id: 'association',   label: 'Association',      icon: '—',   group: 'relation' },
+  { id: 'include',       label: '«include»',        icon: '⤵',   group: 'relation' },
+  { id: 'extend',        label: '«extend»',         icon: '⤴',   group: 'relation' },
+  { id: 'generalization',label: 'Generalization',   icon: '△',   group: 'relation' }
 ];
 
 const SEQUENCE_DIAGRAM_TOOLS = [
   // ── Mode controls ──────────────────────────────────────────
-  { id: 'select',        label: 'Select',           icon: '↖️' },
-  { id: 'delete',        label: 'Delete',            icon: '🗑️' },
+  { id: 'select',        label: 'Select',           icon: '↖️',  group: 'mode'     },
+  { id: 'delete',        label: 'Delete',            icon: '🗑️', group: 'mode'     },
 
   // ── Element types ──────────────────────────────────────────
-  { id: 'lifeline',      label: 'Lifeline',          icon: '|' },
-  { id: 'actor',         label: 'Actor',             icon: '🧍' },
+  { id: 'lifeline',      label: 'Lifeline',          icon: '|',   group: 'element'  },
+  { id: 'actor',         label: 'Actor',             icon: '🧍',  group: 'element'  },
 
   // ── Relationship types ─────────────────────────────────────
-  { id: 'message',       label: 'Message',           icon: '→' },
-  { id: 'return',        label: 'Return',            icon: '←' },
-  { id: 'flow',          label: 'Self Message',      icon: '↩' }
+  { id: 'message',       label: 'Message',           icon: '→',   group: 'relation' },
+  { id: 'return',        label: 'Return',            icon: '←',   group: 'relation' },
+  { id: 'flow',          label: 'Self Message',      icon: '↩',   group: 'relation' }
 ];
 
 

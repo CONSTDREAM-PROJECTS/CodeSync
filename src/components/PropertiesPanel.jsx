@@ -188,7 +188,7 @@ const PropertiesPanel = ({
   };
 
   return (
-    <div className="w-96 bg-[#252526] border-l border-[#3e3e42] flex flex-col">
+    <div className="w-96 flex-shrink-0 bg-[#252526] border-l border-[#3e3e42] flex flex-col">
       {/* Tabs */}
       <div className="flex border-b border-[#3e3e42]">
         <button

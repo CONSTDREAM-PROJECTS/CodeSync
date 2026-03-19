@@ -850,7 +850,7 @@ const UMLEditor = () => {
   };
 
   return (
-    <div className="flex h-screen bg-[#1e1e1e] text-white">
+    <div className="flex w-full bg-[#1e1e1e] text-white overflow-hidden" style={{ height: 'calc(100vh - 60px)' }}>
       {/* Left Sidebar - Diagram Types */}
       <DiagramSidebar
         diagramTypes={diagramTypes}

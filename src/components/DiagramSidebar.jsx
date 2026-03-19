@@ -49,7 +49,7 @@ import React from 'react';
 
 const DiagramSidebar = ({ diagramTypes, selectedDiagram, onDiagramSelect }) => {
   return (
-    <div className="w-64 bg-[#252526] border-r border-[#3e3e42] overflow-y-auto">
+    <div className="w-64 flex-shrink-0 bg-[#252526] border-r border-[#3e3e42] overflow-y-auto">
       <div className="p-4 border-b border-[#3e3e42]">
         <h2 className="text-sm font-semibold text-gray-400 mb-3">UML DIAGRAMS</h2>
       </div>

@@ -124,14 +124,14 @@ const DiagramToolbar = ({
     : 'Generate sequence flow documentation';
 
   return (
-    <div className="p-3 flex items-center justify-between" style={{ background: 'var(--panel-2)', borderBottom: '1px solid rgba(255,255,255,0.03)' }}>
-      <div className="flex items-center space-x-2">
+    <div className="px-3 py-2 flex items-center justify-between flex-shrink-0" style={{ background: 'var(--panel-2)', borderBottom: '1px solid rgba(255,255,255,0.03)' }}>
+      <div className="flex items-center space-x-2 min-w-0 overflow-hidden">
         {/* Language Selector — class diagram only */}
         {supportsLanguageSelect && (
           <select
             value={language}
             onChange={(e) => setLanguage(e.target.value)}
-            className="bg-[#3c3c3c] text-white px-3 py-1.5 rounded border border-[#3e3e42] text-sm focus:outline-none"
+            className="bg-[#3c3c3c] text-white px-3 py-1.5 rounded border border-[#3e3e42] text-sm focus:outline-none flex-shrink-0"
           >
             <option>Java</option>
             <option>Python</option>
@@ -139,33 +139,27 @@ const DiagramToolbar = ({
           </select>
         )}
 
-        <div className="w-px h-6" style={{ background: 'var(--panel)' }}></div>
+        <div className="w-px h-6 flex-shrink-0" style={{ background: 'var(--panel)' }}></div>
 
         {/* File Operations */}
-        <button
-          onClick={onNew}
-          className="p-2 hover:bg-[#3e3e42] rounded transition-colors"
-          title="New"
-        >
+        <button onClick={onNew} className="p-2 hover:bg-[#3e3e42] rounded transition-colors flex-shrink-0" title="New">
           <Save size={18} />
         </button>
-        <label className="p-2 hover:bg-[#3e3e42] rounded transition-colors cursor-pointer" title="Import">
+        <label className="p-2 hover:bg-[#3e3e42] rounded transition-colors cursor-pointer flex-shrink-0" title="Import">
           <Upload size={18} />
           <input type="file" accept=".json" onChange={onImport} className="hidden" />
         </label>
-        <button onClick={onExport} className="p-2 hover:bg-[#3e3e42] rounded transition-colors" title="Export">
+        <button onClick={onExport} className="p-2 hover:bg-[#3e3e42] rounded transition-colors flex-shrink-0" title="Export">
           <Download size={18} />
         </button>
 
-        <div className="w-px h-6 bg-[#3e3e42]"></div>
+        <div className="w-px h-6 bg-[#3e3e42] flex-shrink-0"></div>
 
         {/* Undo/Redo */}
         <button
           onClick={onUndo}
           disabled={!canUndo}
-          className={`p-2 rounded transition-colors ${
-            canUndo ? 'hover:bg-[#3e3e42]' : 'opacity-50 cursor-not-allowed'
-          }`}
+          className={`p-2 rounded transition-colors flex-shrink-0 ${canUndo ? 'hover:bg-[#3e3e42]' : 'opacity-50 cursor-not-allowed'}`}
           title="Undo"
         >
           <Undo size={18} />
@@ -173,27 +167,25 @@ const DiagramToolbar = ({
         <button
           onClick={onRedo}
           disabled={!canRedo}
-          className={`p-2 rounded transition-colors ${
-            canRedo ? 'hover:bg-[#3e3e42]' : 'opacity-50 cursor-not-allowed'
-          }`}
+          className={`p-2 rounded transition-colors flex-shrink-0 ${canRedo ? 'hover:bg-[#3e3e42]' : 'opacity-50 cursor-not-allowed'}`}
           title="Redo"
         >
           <Redo size={18} />
         </button>
 
-        <div className="w-px h-6 bg-[#3e3e42]"></div>
+        <div className="w-px h-6 bg-[#3e3e42] flex-shrink-0"></div>
 
         {/* View Controls */}
-        <button onClick={onZoomIn} className="p-2 hover:bg-[#3e3e42] rounded transition-colors" title="Zoom In">
+        <button onClick={onZoomIn} className="p-2 hover:bg-[#3e3e42] rounded transition-colors flex-shrink-0" title="Zoom In">
           <ZoomIn size={18} />
         </button>
-        <span className="text-sm text-gray-400 px-2">{Math.round(zoom * 100)}%</span>
-        <button onClick={onZoomOut} className="p-2 hover:bg-[#3e3e42] rounded transition-colors" title="Zoom Out">
+        <span className="text-sm text-gray-400 px-2 flex-shrink-0">{Math.round(zoom * 100)}%</span>
+        <button onClick={onZoomOut} className="p-2 hover:bg-[#3e3e42] rounded transition-colors flex-shrink-0" title="Zoom Out">
           <ZoomOut size={18} />
         </button>
         <button
           onClick={onToggleGrid}
-          className={`p-2 rounded transition-colors ${showGrid ? 'btn-primary' : 'hover:bg-[#3e3e42]'}`}
+          className={`p-2 rounded transition-colors flex-shrink-0 ${showGrid ? 'btn-primary' : 'hover:bg-[#3e3e42]'}`}
           style={showGrid ? { color: '#222' } : {}}
           title="Toggle Grid"
         >
@@ -201,7 +193,7 @@ const DiagramToolbar = ({
         </button>
       </div>
 
-      <div className="flex items-center space-x-2">
+      <div className="flex items-center space-x-2 flex-shrink-0 ml-2">
         {/* Code to Diagram — Class Diagram only */}
         {supportsCodeImport && (
           <button
