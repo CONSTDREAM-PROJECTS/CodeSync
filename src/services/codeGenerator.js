@@ -3,9 +3,37 @@
  * codeGenerator.js — Code Generator Service
  * ============================================================
  *
- * Produces RUNNABLE source code from UML class, use-case, and
- * sequence diagrams. "Runnable" means copy-paste into a compiler
- * or interpreter and execute without touching a single line.
+ * WHAT THIS FILE DOES (Layman's):
+ * Think of this as a translator that takes your visual diagram
+ * and writes the actual source code for you. Once you've drawn
+ * your classes, attributes, methods, and relationships in the
+ * UML editor, this file turns that drawing into real, runnable
+ * Java, Python, or JavaScript code — ready to copy-paste into
+ * a project and compile or run without editing a single line.
+ * It also handles use-case and sequence diagrams, generating
+ * documentation and handler stubs for those as well.
+ *
+ * TECHNICAL OVERVIEW:
+ * A static-method-only class organized into four layers:
+ *   Layer 1 — Type/Normalisation Utilities: mapType(), getDefaultValue(),
+ *              normalizeIdentifier(), normalizeType() — sanitize diagram
+ *              data before it touches any code-emission logic.
+ *   Layer 2 — Public API: generateCode(), splitIntoFiles() — the only
+ *              methods external callers should use.
+ *   Layer 3 — Language Dispatchers: generateClassDiagramCode(),
+ *              generateJavaCode(), generatePythonCode(),
+ *              generateJavaScriptCode() — one branch per language.
+ *   Layer 4 — Element Builders: buildJavaClass(), buildPythonClass(),
+ *              buildJavaScriptClass(), and their helper methods —
+ *              emit fully valid class bodies including fields,
+ *              constructors, methods, getters/setters, and toString.
+ *
+ * HOW IT RELATES TO THE REST OF THE CODEBASE:
+ * - UMLEditor.jsx calls splitIntoFiles() when the user clicks "Generate Code".
+ * - typeMapper.js is the standalone equivalent of mapType()/getDefaultValue()
+ *   used by codeToUMLConverter.js for the reverse direction.
+ * - ValidationService.js runs before this file to guarantee the diagram
+ *   data fed in is structurally sound.
  *
  * Key guarantees per language:
  *   Java       — valid package, imports, public class per file,
@@ -24,6 +52,24 @@ class CodeGenerator {
   // TYPE-MAPPING UTILITIES
   // ─────────────────────────────────────────────────────────
 
+  /**
+   * mapType(umlType, lang)
+   * ----------------------
+   * LAYMAN'S: The diagram stores generic type names like "Integer" or "List".
+   * This translates them to the correct word for the chosen language —
+   * "Integer" becomes "int" in Java, "int" in Python, and "number" in JS.
+   *
+   * TECHNICAL: Two-level lookup into a nested literal object. Returns the raw
+   * UML type if the language or type mapping is missing (graceful degradation).
+   *
+   * RELATIONSHIP: A slimmed-down sibling of TypeMapper.mapType() in typeMapper.js.
+   * Both do the same job; this one is inlined here so codeGenerator.js has no
+   * external service dependency during code emission.
+   *
+   * @param {string} umlType - Generic UML type name (e.g., "Integer")
+   * @param {string} lang    - Target language ("Java" | "Python" | "JavaScript")
+   * @returns {string}       - Language-native type string
+   */
   static mapType(umlType, lang) {
     const map = {
       Java: {
@@ -55,8 +101,25 @@ class CodeGenerator {
   }
 
   /**
-   * Return a concrete literal that satisfies the type — never 'null'
-   * where the compiler would reject it for primitives.
+   * getDefaultValue(nativeType, lang)
+   * -----------------------------------
+   * LAYMAN'S: Every field and return statement needs a "blank slate" value.
+   * This returns the correct one per language — 0 for Java ints, "" for
+   * Python strings, [] for JS Arrays, etc. — so generated code compiles
+   * without null-pointer or type errors.
+   *
+   * TECHNICAL: Two-level lookup using the *already-mapped* native type name
+   * (not the UML name). Uses nullish coalescing to handle the space-padded
+   * 'string ' key that exists as a workaround for a JS Map collision.
+   *
+   * RELATIONSHIP: Called after mapType() at every field declaration and
+   * return statement inside buildJavaClass(), buildPythonClass(), and
+   * buildJavaScriptClass(). The standalone counterpart is
+   * TypeMapper.getDefaultValue() in typeMapper.js.
+   *
+   * @param {string} nativeType - Language-native type string (e.g., "int")
+   * @param {string} lang       - Target language
+   * @returns {string}          - Initialization literal (e.g., "0", "null", "[]")
    */
   static getDefaultValue(nativeType, lang) {
     const defs = {
@@ -95,6 +158,27 @@ class CodeGenerator {
   // PUBLIC API
   // ─────────────────────────────────────────────────────────
 
+  /**
+   * generateCode(elements, connections, language, diagramType)
+   * -----------------------------------------------------------
+   * LAYMAN'S: The main "one big file" output. Hands back all classes
+   * concatenated into a single string — useful for the preview panel
+   * where the user wants to quickly see what was generated.
+   *
+   * TECHNICAL: Normalizes the model first, then dispatches to the
+   * correct diagram-type handler, and finally runs formatCode()
+   * to strip trailing whitespace and collapse excess blank lines.
+   * For multi-file output, use splitIntoFiles() instead.
+   *
+   * RELATIONSHIP: Called by UMLEditor.jsx for the single-string
+   * preview. splitIntoFiles() is called when the user downloads.
+   *
+   * @param {Array}  elements    - Diagram element objects
+   * @param {Array}  connections - Diagram connection objects
+   * @param {string} language    - "Java" | "Python" | "JavaScript"
+   * @param {string} diagramType - "class" | "usecase" | "sequence"
+   * @returns {string}           - Complete generated source code
+   */
   static generateCode(elements, connections = [], language = 'Java', diagramType = 'class') {
     const { elements: els, connections: conns } = this.normalizeModel(elements, connections);
     let code = '';
@@ -107,7 +191,25 @@ class CodeGenerator {
     return this.formatCode(code, language);
   }
 
-  /** Returns Array<{ filename, content }> — one real file per class */
+  /**
+   * splitIntoFiles(elements, connections, language, diagramType)
+   * -------------------------------------------------------------
+   * LAYMAN'S: Instead of one big blob, this produces one properly named
+   * file per class — exactly what you'd have in a real project. Java gets
+   * "BankAccount.java", Python gets "bank_account.py", and so on.
+   * Use-case and sequence diagrams also get a Markdown docs file alongside
+   * their handler class.
+   *
+   * TECHNICAL: Returns Array<{ filename: string, content: string }>.
+   * For class diagrams, one entry is emitted per class element.
+   * Other diagram types get two entries: a .md documentation file and
+   * a language-specific handler class file. Falls back to a placeholder
+   * if no relevant elements are found.
+   *
+   * RELATIONSHIP: Primary output method called by UMLEditor.jsx when
+   * the user clicks the download/generate-files action. generateCode()
+   * uses this internally for its single-string version.
+   */
   static splitIntoFiles(elements, connections = [], language = 'Java', diagramType = 'class') {
     const { elements: els, connections: conns } = this.normalizeModel(elements, connections);
     const files = [];
@@ -148,6 +250,22 @@ class CodeGenerator {
   // NORMALISATION
   // ─────────────────────────────────────────────────────────
 
+  /**
+   * normalizeModel(elements, connections)
+   * ----------------------------------------
+   * LAYMAN'S: Before generating code, this cleans up the diagram data —
+   * fixing capitalization, stripping illegal characters from names, and
+   * falling back to safe defaults for missing types. It's the "sanitizer"
+   * that prevents bad diagram data from producing broken source code.
+   *
+   * TECHNICAL: Maps over all elements and their attributes/methods,
+   * applying normalizeIdentifier() and normalizeType() to every name
+   * and type field. Returns a new {elements, connections} object —
+   * original data is never mutated.
+   *
+   * RELATIONSHIP: Called at the very top of generateCode() and
+   * splitIntoFiles() before any language-specific dispatch occurs.
+   */
   static normalizeModel(elements, connections) {
     const els = elements.map(el => ({
       ...el,
@@ -1047,7 +1165,22 @@ class CodeGenerator {
   // HELPERS
   // ─────────────────────────────────────────────────────────
 
-  /** Topological sort so parent classes are emitted before children */
+  /**
+   * topoSort(elements, connections)
+   * ---------------------------------
+   * LAYMAN'S: When a child class extends a parent, the parent's code must
+   * appear first in the file — otherwise the compiler complains it doesn't
+   * know what the parent is yet. This sorts the classes so parents always
+   * come before their children.
+   *
+   * TECHNICAL: Depth-first recursive traversal following 'inheritance'
+   * connection edges. Uses a visited Set to prevent double-emission for
+   * shared ancestors. Returns a topologically ordered copy of elements.
+   *
+   * RELATIONSHIP: Called by generatePythonCode() and generateJavaScriptCode()
+   * before emitting class bodies. Java doesn't require it (each class is its
+   * own file) but uses it for consistency in multi-class preview mode.
+   */
   static topoSort(elements, connections) {
     const visited = new Set();
     const result  = [];
@@ -1068,6 +1201,21 @@ class CodeGenerator {
     return result;
   }
 
+  /**
+   * pluralize(word)
+   * ---------------
+   * LAYMAN'S: When a class "owns many Orders", the field should be called
+   * `orders`, not `order`. This adds the right plural suffix (s, es, ies).
+   *
+   * TECHNICAL: Applies simple English suffix rules in priority order:
+   * words ending in s/x/z → +es, words ending in consonant+y → -y+ies,
+   * all others → +s. Not a full morphological engine — handles the common
+   * cases that appear in typical class names.
+   *
+   * RELATIONSHIP: Called by buildJavaRelationshipFields(),
+   * buildPythonRelationshipFields(), and buildJavaScriptRelationshipFields()
+   * whenever a "many" multiplicity (* or 1..*) is detected on a connection.
+   */
   static pluralize(word) {
     if (!word) return 'items';
     if (word.endsWith('s') || word.endsWith('x') || word.endsWith('z')) return word + 'es';
@@ -1075,6 +1223,20 @@ class CodeGenerator {
     return word + 's';
   }
 
+  /**
+   * getFileName(className, language)
+   * ----------------------------------
+   * LAYMAN'S: Every language has a naming convention for its files.
+   * Java uses PascalCase.java, Python uses snake_case.py, JS uses
+   * PascalCase.js. This makes sure the generated file gets the right name.
+   *
+   * TECHNICAL: Simple switch on language string. Python paths go through
+   * toSnakeCase() first; others use the class name directly. Unknown
+   * languages fall back to .txt so the file is always downloadable.
+   *
+   * RELATIONSHIP: Called by splitIntoFiles() when building the filename
+   * field of each {filename, content} entry in the returned array.
+   */
   static getFileName(className, language) {
     switch (language) {
       case 'Java':       return `${className}.java`;
@@ -1091,6 +1253,21 @@ class CodeGenerator {
       .replace(/^_/, '');
   }
 
+  /**
+   * formatCode(code, language)
+   * ----------------------------
+   * LAYMAN'S: A final polish step — collapses triple blank lines into
+   * double, strips trailing spaces from every line, and trims the whole
+   * file so there's no leading/trailing whitespace. Makes the output
+   * look like a human wrote it.
+   *
+   * TECHNICAL: Two regex passes followed by a split-map-join for
+   * per-line trimEnd(). The language parameter is accepted for future
+   * language-specific formatting hooks (currently unused).
+   *
+   * RELATIONSHIP: Called as the last step inside generateCode() before
+   * the string is returned to the caller.
+   */
   static formatCode(code, language) {
     let out = code.replace(/\n{3,}/g, '\n\n');
     out = out.split('\n').map(l => l.trimEnd()).join('\n');

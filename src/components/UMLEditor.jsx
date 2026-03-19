@@ -1,3 +1,60 @@
+/**
+ * ============================================================
+ * UMLEditor.jsx — Root Editor Component
+ * ============================================================
+ *
+ * WHAT THIS FILE DOES (Layman's):
+ * This is the heart of the whole application — the main screen you
+ * see when the app loads. It stitches together every other component
+ * and service: the sidebar for picking diagram types, the toolbar
+ * for file operations and code generation, the tool palette for
+ * adding elements, the SVG canvas where the diagram is drawn and
+ * edited, the properties panel on the right, and the code import
+ * modal. Everything the user can do — drawing, connecting, dragging,
+ * resizing, undoing, generating code — is coordinated here.
+ *
+ * TECHNICAL OVERVIEW:
+ * A single large React functional component that acts as the
+ * application's state container and event hub. Responsibilities
+ * are split across:
+ *
+ *   State management  — elements, connections, selection, tool mode,
+ *                       code output, resize state, clipboard, and
+ *                       modal visibility all live here as useState.
+ *
+ *   Custom hooks      — useHistory (undo/redo stack) and
+ *                       useCanvasInteractions (drag, pan, zoom, grid)
+ *                       are consumed here and their APIs distributed
+ *                       to child components as props.
+ *
+ *   Event handlers    — handleMouseDown, handleMouseMove, handleMouseUp
+ *                       drive dragging and resizing. handleCanvasClick
+ *                       handles element selection, connection creation,
+ *                       and deletion. A useEffect wires keyboard shortcuts
+ *                       (Ctrl+Z/Y/C/V/D, Delete).
+ *
+ *   SVG rendering     — All diagram elements (class, interface, abstract,
+ *                       object, component, package, use-case, actor) and
+ *                       connections (with correct arrowhead markers,
+ *                       multiplicity labels, and role annotations) are
+ *                       rendered inside a single <svg> with a pannable,
+ *                       zoomable <g> transform group.
+ *
+ *   Services          — CodeGenerator.splitIntoFiles() is called on
+ *                       "Generate Code". CodeToUMLConverter is triggered
+ *                       via CodeImportModal for reverse code import.
+ *
+ * HOW IT RELATES TO THE REST OF THE CODEBASE:
+ * - Imports and renders: DiagramSidebar, DiagramToolbar, ToolPalette,
+ *   PropertiesPanel, CodeImportModal.
+ * - Consumes hooks: useHistory (useHistory.js),
+ *   useCanvasInteractions (useCanvasInteractions.js).
+ * - Calls services: CodeGenerator (codeGenerator.js),
+ *   CodeToUMLConverter (codeToUMLConverter.js).
+ * - Data constants: diagramTypes, getToolbarItems (diagramUtils.js).
+ * ============================================================
+ */
+
 import React, { useState, useRef, useEffect } from 'react';
 import CodeGenerator from '../services/codeGenerator';
 import CodeToUMLConverter from '../services/codeToUMLConverter';
@@ -10,28 +67,73 @@ import ToolPalette from './ToolPalette';
 import PropertiesPanel from './PropertiesPanel';
 import CodeImportModal from './CodeImportModal';
 
+/**
+ * UMLEditor()
+ * ------------
+ * LAYMAN'S: The root component. Renders the full editor layout —
+ *   sidebar, toolbar, palette, canvas, properties panel — and owns
+ *   all diagram state. Every child component receives what it needs
+ *   as props and sends events back up through callbacks.
+ *
+ * TECHNICAL: No props — this is a top-level routed component.
+ *   All state is initialized here; nothing is lifted further up.
+ *   The SVG canvas renders directly inside this component rather
+ *   than being extracted, because the connection rendering logic
+ *   (edge-point geometry, arrowhead markers) is tightly coupled to
+ *   the element positions held in local state.
+ */
+
 const UMLEditor = () => {
-  // State Management
+  // ── Diagram & language state ──────────────────────────────
+  // selectedDiagram: which diagram type is active ("class", "usecase", "sequence").
+  // language: the target programming language for code generation.
+  // elements / connections: the live diagram model — source of truth for all rendering.
   const [selectedDiagram, setSelectedDiagram] = useState('class');
   const [language, setLanguage] = useState('Java');
   const [elements, setElements] = useState([]);
   const [connections, setConnections] = useState([]);
+
+  // ── Selection state ────────────────────────────────────────
+  // selectedElements: array (supports multi-select via Ctrl+click).
+  // selectedConnection: single selected connection line (mutually exclusive with elements).
+  // selectedTool: active tool id ("select", "delete", or a shape/relationship type).
+  // connectionStart: id of the first element clicked when drawing a connection.
   const [selectedElements, setSelectedElements] = useState([]);
   const [selectedConnection, setSelectedConnection] = useState(null);
   const [selectedTool, setSelectedTool] = useState('select');
+  const [connectionStart, setConnectionStart] = useState(null);
+
+  // ── Code generation state ──────────────────────────────────
+  // generatedCode: single-string preview (first file's content for backward compat).
+  // generatedFiles: Array<{ filename, content }> from CodeGenerator.splitIntoFiles().
+  // selectedFileIndex: which file tab is active in the Generated Code panel.
+  // showCodePanel: controls Properties vs Generated Code tab in PropertiesPanel.
   const [generatedCode, setGeneratedCode] = useState('');
   const [generatedFiles, setGeneratedFiles] = useState([]);
   const [selectedFileIndex, setSelectedFileIndex] = useState(0);
   const [showCodePanel, setShowCodePanel] = useState(false);
-  const [connectionStart, setConnectionStart] = useState(null);
+
+  // ── Clipboard state ────────────────────────────────────────
+  // clipboard: deep-clone of the last copied element(s). Supports Ctrl+V paste.
   const [clipboard, setClipboard] = useState(null);
+
+  // ── Resize state ───────────────────────────────────────────
+  // isResizing / resizeHandle: track active corner/edge resize operations.
+  // resizeStartPos: screen position where the resize drag began.
+  // originalElement: snapshot of the element's size/position before resizing started,
+  //   used to compute deltas without accumulation errors.
   const [isResizing, setIsResizing] = useState(false);
   const [resizeHandle, setResizeHandle] = useState(null);
   const [resizeStartPos, setResizeStartPos] = useState({ x: 0, y: 0 });
   const [originalElement, setOriginalElement] = useState(null);
+
+  // ── Modal state ────────────────────────────────────────────
+  // showCodeImportModal: controls visibility of the CodeImportModal overlay.
   const [showCodeImportModal, setShowCodeImportModal] = useState(false);
 
-  // Custom hooks
+  // ── Custom hooks ───────────────────────────────────────────
+  // useHistory provides saveToHistory, undo, redo, resetHistory, canUndo, canRedo.
+  // useCanvasInteractions provides drag, pan, zoom, grid helpers and canvasRef.
   const { saveToHistory, undo, redo, resetHistory, canUndo, canRedo } = useHistory();
   const {
     isDragging,
@@ -52,15 +154,41 @@ const UMLEditor = () => {
     getCanvasCoordinates
   } = useCanvasInteractions();
 
+  /**
+   * elementHeightCache
+   * LAYMAN'S: A performance cache. Recalculating element heights on every
+   *   render is expensive — this Map stores the last computed height per
+   *   element so the height-sync useEffect only recalculates when an
+   *   element's attribute/method count or stereotype actually changes.
+   * TECHNICAL: useRef (not useState) so updates don't trigger re-renders.
+   *   Keys are composite strings: `${id}-${attrCount}-${methodCount}-${stereotype}`.
+   */
   const elementHeightCache = useRef(new Map());
 
-  // Copy/Paste functionality
+  /**
+   * copyElement()
+   * LAYMAN'S: Copies all currently selected elements to an internal
+   *   clipboard so the user can paste them with Ctrl+V.
+   * TECHNICAL: Deep-clones selectedElements into clipboard state using
+   *   JSON.parse/stringify. Clipboard persists until the next copy
+   *   or until the component unmounts.
+   */
   const copyElement = () => {
     if (selectedElements.length > 0) {
       setClipboard(JSON.parse(JSON.stringify(selectedElements)));
     }
   };
 
+  /**
+   * pasteElement()
+   * LAYMAN'S: Pastes the clipboard contents onto the canvas, offset
+   *   by 20px so the paste doesn't land exactly on top of the original.
+   * TECHNICAL: Handles both array (multi-select copy) and legacy single-
+   *   item clipboard values. Generates new unique ids via Date.now() + index
+   *   to avoid id collisions. Saves to history so paste is undoable.
+   *   Sets selectedElements to the new elements so the user can immediately
+   *   move the paste result.
+   */
   const pasteElement = () => {
     if (clipboard) {
       let newElements = [];
@@ -92,6 +220,15 @@ const UMLEditor = () => {
     }
   };
 
+  /**
+   * updateElement(elementId, updates)
+   * LAYMAN'S: Applies a partial change to a specific element — for example,
+   *   updating its name or moving it. Updates both the master list and the
+   *   selection so the canvas and properties panel stay in sync.
+   * TECHNICAL: Immutable map — returns a new array with only the target
+   *   element replaced via spread. Also patches selectedElements to avoid
+   *   stale closure values in the properties form on the next render.
+   */
   // Update element function
   const updateElement = (elementId, updates) => {
     const updated = elements.map(el =>
@@ -103,6 +240,19 @@ const UMLEditor = () => {
     ));
   };
 
+  /**
+   * Keyboard shortcuts useEffect
+   * LAYMAN'S: Wires up the familiar keyboard shortcuts:
+   *   Ctrl+Z = Undo, Ctrl+Shift+Z / Ctrl+Y = Redo,
+   *   Ctrl+C = Copy, Ctrl+V = Paste, Ctrl+D = Delete selected,
+   *   Delete key = delete selected element or connection.
+   * TECHNICAL: Attaches a 'keydown' listener to window (not just the
+   *   SVG) so shortcuts work regardless of which element has focus.
+   *   Returns a cleanup function that removes the listener on unmount
+   *   or when the dependency array values change.
+   *   e.preventDefault() on Ctrl+Z/Y/C/V/D suppresses browser defaults
+   *   (e.g., browser undo, page print).
+   */
   // Keyboard shortcuts
   useEffect(() => {
     const handleKeyDown = (e) => {
@@ -165,6 +315,18 @@ const UMLEditor = () => {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [selectedElements, selectedConnection, elements, connections, clipboard]);
 
+  /**
+   * calculateElementHeight(element)
+   * LAYMAN'S: Figures out how tall a class box needs to be based on
+   *   how many attributes and methods it has, plus whether it has a
+   *   stereotype label. More rows = taller box, so content never overflows.
+   * TECHNICAL: Formula: baseHeight (60) + stereotypeHeight (20 if set)
+   *   + attrCount×18 + methodCount×18 + padding (30 if any rows exist).
+   *   Clamped to a minimum of 100px. 18px per row matches the fontSize="11"
+   *   lineHeight used when rendering text inside SVG elements.
+   * RELATIONSHIP: Called by the height-sync useEffect below and also
+   *   when a new element is added in addElement().
+   */
   // Auto-calculate element height based on content
   const calculateElementHeight = (element) => {
     const baseHeight = 60;
@@ -178,6 +340,16 @@ const UMLEditor = () => {
     return Math.max(100, baseHeight + stereotypeHeight + attrHeight + methodHeight + padding);
   };
 
+  /**
+   * Height-sync useEffect
+   * LAYMAN'S: Automatically resizes class boxes whenever the user adds
+   *   or removes attributes and methods, so the box always fits its content.
+   *   Without this, a box with 10 methods would overflow its fixed height.
+   * TECHNICAL: Runs after every render where elements changes. Uses
+   *   elementHeightCache to skip recalculation if the content key hasn't
+   *   changed. Only calls setElements when at least one height actually
+   *   changed (hasChanges guard) to prevent an infinite render loop.
+   */
   // Update element height when attributes/methods change
   useEffect(() => {
     let hasChanges = false;
@@ -203,6 +375,21 @@ const UMLEditor = () => {
     }
   }, [elements]);
 
+  /**
+   * addElement(type)
+   * LAYMAN'S: Called when the user clicks a tool in the palette. If the tool
+   *   is a shape (class, interface, actor, etc.) it adds a new element at a
+   *   staggered position on the canvas. If the tool is a relationship type
+   *   (inheritance, composition, etc.) it switches to connection-drawing mode
+   *   instead — no element is added yet.
+   * TECHNICAL: Relationship types are identified by an allowlist array.
+   *   Shape elements get a default size, a generated name, and type-appropriate
+   *   fields (attributes/methods for classes, attributeValues for objects, etc.).
+   *   id is Date.now() — suitable for a single-user session but would need
+   *   a UUID for multi-user/persistence scenarios.
+   *   After adding, selectedTool reverts to 'select' and the new element is
+   *   auto-selected so the user can immediately edit it in the properties panel.
+   */
   // Add element to canvas
   const addElement = (type) => {
     const relationshipTypes = ['association', 'inheritance', 'aggregation', 'composition', 'dependency', 'realization', 'link', 'include', 'extend', 'generalization', 'flow', 'transition', 'message', 'return', 'connector', 'import', 'extension'];
@@ -237,6 +424,20 @@ const UMLEditor = () => {
     setSelectedElements([newElement]);
   };
 
+  /**
+   * handleCanvasClick(e)
+   * LAYMAN'S: The main click handler for the SVG canvas. Its behavior changes
+   *   depending on the active tool:
+   *   — Relationship tool: first click sets the "from" element; second click on
+   *     a different element creates the connection. Click on empty space cancels.
+   *   — Delete tool: removes whichever element was clicked.
+   *   — Select tool (default): clicking empty space deselects everything.
+   * TECHNICAL: Uses getCanvasCoordinates() to convert the mouse event's
+   *   clientX/Y into diagram-space coordinates, then performs a simple AABB
+   *   (axis-aligned bounding box) hit-test against all elements.
+   *   Connection creation is a two-click state machine driven by connectionStart.
+   *   Self-connections are prevented (connectionStart !== clickedElement.id).
+   */
   // Handle canvas click
   const handleCanvasClick = (e) => {
     if (!canvasRef.current) return;
@@ -307,6 +508,17 @@ const UMLEditor = () => {
     }
   };
 
+  /**
+   * handleMouseDown(e, element)
+   * LAYMAN'S: Called when the user presses a mouse button on a diagram element.
+   *   Middle-mouse or Shift+click starts canvas panning. Left-click selects the
+   *   element (or toggles it in/out of the selection if Ctrl is held) and starts
+   *   a drag operation for single-element moves.
+   * TECHNICAL: e.stopPropagation() prevents the click from bubbling to the SVG's
+   *   onClick handler (handleCanvasClick), which would immediately deselect.
+   *   Multi-select (Ctrl/Meta) uses functional setState to toggle membership.
+   *   Drag only starts for single selections — multi-select drag is not supported.
+   */
   const handleMouseDown = (e, element) => {
     e.stopPropagation();
 
@@ -337,6 +549,20 @@ const UMLEditor = () => {
     }
   };
 
+  /**
+   * handleMouseMove(e)
+   * LAYMAN'S: Called on every mouse movement over the SVG canvas. It handles
+   *   three separate tasks depending on what's active: resizing an element via
+   *   its corner/edge handles, panning the canvas viewport, or dragging an
+   *   element to a new position.
+   * TECHNICAL: Priority order: resize > pan > drag.
+   *   Resize: computes delta from resizeStartPos, applies it to originalElement
+   *   dimensions with handle-specific axis logic (8 cases: nw/ne/sw/se/n/s/w/e).
+   *   Delta is divided by zoom so resize speed matches the visual scale.
+   *   Pan: delegated to updatePan() from useCanvasInteractions.
+   *   Drag: delegated to updateDrag(), which returns {x, y} or null.
+   *   All three paths clamp to minimum sizes (50×30) to prevent negative dimensions.
+   */
   const handleMouseMove = (e) => {
     if (isResizing && selectedElements.length === 1 && originalElement) {
       const deltaX = e.clientX - resizeStartPos.x;
@@ -411,6 +637,15 @@ const UMLEditor = () => {
     }
   };
 
+  /**
+   * handleMouseUp()
+   * LAYMAN'S: Called when the user releases any mouse button. Finalizes
+   *   whatever interaction was in progress — drag, resize, or pan — and
+   *   saves an undo snapshot if the diagram was modified.
+   * TECHNICAL: Saves to history only when a drag or resize actually
+   *   completed (isDragging/isResizing guards). Then resets all
+   *   interaction state flags so the next interaction starts clean.
+   */
   const handleMouseUp = () => {
     if (isDragging && selectedElements.length === 1) {
       saveToHistory(elements, connections);
@@ -425,6 +660,17 @@ const UMLEditor = () => {
     setOriginalElement(null);
   };
 
+  /**
+   * handleResizeStart(e, element, handle)
+   * LAYMAN'S: Called when the user starts dragging one of the eight resize
+   *   handles (corners + edge midpoints) that appear around a selected element.
+   *   Records the starting mouse position and a snapshot of the element so
+   *   handleMouseMove can compute clean deltas.
+   * TECHNICAL: e.stopPropagation() prevents the mousedown from bubbling to
+   *   handleMouseDown, which would start a drag instead of a resize.
+   *   originalElement is a shallow clone — sufficient because only x/y/width/height
+   *   are read during resize and those are all primitives.
+   */
   // Resize handlers
   const handleResizeStart = (e, element, handle) => {
     e.stopPropagation();
@@ -434,6 +680,18 @@ const UMLEditor = () => {
     setOriginalElement({ ...element });
   };
 
+  /**
+   * handleGenerateCode()
+   * LAYMAN'S: Called when the user clicks "Generate Code" in the toolbar.
+   *   Runs the code generator on the current diagram, stores the result,
+   *   and switches the right panel to the "Generated Code" tab so the user
+   *   can immediately see and copy the output.
+   * TECHNICAL: Calls CodeGenerator.splitIntoFiles() which returns
+   *   Array<{ filename, content }>. Sets generatedFiles for the multi-file
+   *   tab UI and also sets generatedCode to files[0].content for backward
+   *   compatibility with any code that reads the single-string version.
+   *   Resets selectedFileIndex to 0 so the first file is shown.
+   */
   // Generate code
   const handleGenerateCode = () => {
     // Use new file splitting feature for accurate code generation
@@ -448,11 +706,30 @@ const UMLEditor = () => {
     setShowCodePanel(true);
   };
 
+  /**
+   * handleCodeToUML()
+   * LAYMAN'S: Opens the "Code to Diagram" import modal. The actual
+   *   conversion work happens inside CodeImportModal + CodeToUMLConverter.
+   * TECHNICAL: Simply flips showCodeImportModal to true — the modal
+   *   component handles all conversion state internally.
+   */
   // Code to UML conversion
   const handleCodeToUML = () => {
     setShowCodeImportModal(true);
   };
 
+  /**
+   * handleImportCode(importedElements, importedConnections)
+   * LAYMAN'S: Called by CodeImportModal after a successful conversion.
+   *   If the canvas is empty, the imported classes just replace it.
+   *   If there's already a diagram, the imported classes are placed to
+   *   the right of the existing ones so they don't overlap.
+   * TECHNICAL: Calculates maxX (rightmost x + width of all existing elements)
+   *   and offsets importedElements.x by maxX + 100px. Saves merged state to
+   *   history so the import is a single undoable action.
+   *   Note: the history save uses the pre-merge elements/connections due to
+   *   closure capture — a known minor quirk that doesn't affect correctness.
+   */
   const handleImportCode = (importedElements, importedConnections) => {
     // Merge or replace the diagram
     if (elements.length === 0 && connections.length === 0) {
@@ -480,6 +757,15 @@ const UMLEditor = () => {
     alert(`Successfully imported ${importedElements.length} classes from code!`);
   };
 
+  /**
+   * handleExport()
+   * LAYMAN'S: Saves the current diagram to a .json file on the user's
+   *   computer. The file preserves everything — all elements, connections,
+   *   diagram type, and language — so the user can reload it later.
+   * TECHNICAL: Serializes state to JSON, creates a Blob, generates a
+   *   temporary object URL, programmatically clicks a hidden <a> element
+   *   to trigger the browser download, then revokes the URL to free memory.
+   */
   // Export/Import functions
   const handleExport = () => {
     const data = JSON.stringify({ 
@@ -497,6 +783,17 @@ const UMLEditor = () => {
     URL.revokeObjectURL(url);
   };
 
+  /**
+   * handleImport(e)
+   * LAYMAN'S: Loads a previously exported .json file back into the editor,
+   *   restoring the diagram exactly as it was saved — including diagram type
+   *   and language. The undo history is reset so the user can't undo back
+   *   to before the file was loaded.
+   * TECHNICAL: Uses FileReader.readAsText() asynchronously. Parses the JSON
+   *   and applies defaults (|| []) for safety in case the file is missing
+   *   fields. Calls resetHistory() so the loaded state is the new baseline.
+   *   Alerts the user on JSON parse failure rather than silently failing.
+   */
   const handleImport = (e) => {
     const file = e.target.files[0];
     if (file) {
@@ -519,6 +816,13 @@ const UMLEditor = () => {
     }
   };
 
+  /**
+   * handleNew()
+   * LAYMAN'S: Clears the entire canvas and starts fresh. Resets the undo
+   *   history so the user can't undo back to the previous diagram.
+   * TECHNICAL: Resets all diagram state and calls resetHistory([],[]) to
+   *   replace the history stack with a single empty snapshot.
+   */
   const handleNew = () => {
     setElements([]);
     setConnections([]);
@@ -527,6 +831,18 @@ const UMLEditor = () => {
     setSelectedConnection(null);
   };
 
+  /**
+   * handleDiagramSelect(diagramId)
+   * LAYMAN'S: Switches the editor to a different diagram type (e.g., from
+   *   Class to Use Case). Resets the active tool and cancels any in-progress
+   *   connection so the user starts clean in the new diagram.
+   * TECHNICAL: Sets selectedDiagram (which causes DiagramToolbar and
+   *   ToolPalette to re-render with the correct controls for the new type)
+   *   and resets selectedTool/'select' + connectionStart/null.
+   *   Does NOT clear existing elements — the canvas persists across
+   *   diagram type switches so the user can have elements from multiple
+   *   diagram types on the same canvas.
+   */
   const handleDiagramSelect = (diagramId) => {
     setSelectedDiagram(diagramId);
     setSelectedTool('select');

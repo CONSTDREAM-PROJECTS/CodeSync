@@ -1,5 +1,78 @@
+/**
+ * ============================================================
+ * PropertiesPanel.jsx — Properties & Generated Code Side Panel
+ * ============================================================
+ *
+ * WHAT THIS FILE DOES (Layman's):
+ * This is the right-hand panel in the editor. It has two tabs:
+ *
+ *   "Properties" tab — shows an editing form for whatever is
+ *   currently selected on the canvas. Select a class and you can
+ *   rename it, add/remove attributes and methods, change visibility,
+ *   mark things static or abstract, and resize it. Select a
+ *   connection and you can set multiplicity, labels, and roles.
+ *   Select nothing and you see a placeholder prompt.
+ *
+ *   "Generated Code" tab — shows the source code that was last
+ *   generated from the diagram. If the diagram produced multiple
+ *   files, file-name tabs let you browse between them. A "Copy Code"
+ *   button lets the user grab the code quickly.
+ *
+ * TECHNICAL OVERVIEW:
+ * Three React components are defined in this file:
+ *   1. PropertiesPanel   — outer container; owns tab switching and
+ *                          the currentCode sync effect; routes to the
+ *                          correct sub-component based on selection.
+ *   2. ElementProperties — form UI for editing a single element's
+ *                          name, stereotype, size, attributes, and methods.
+ *                          Inline helpers: updateAttribute, addAttribute,
+ *                          removeAttribute, updateMethod, addMethod,
+ *                          removeMethod.
+ *   3. ConnectionProperties — form UI for editing a connection's
+ *                             multiplicity, label, and role annotations.
+ *
+ * HOW IT RELATES TO THE REST OF THE CODEBASE:
+ * - Rendered by UMLEditor.jsx as the fixed right sidebar.
+ * - setElements / setConnections prop calls modify UMLEditor's
+ *   live diagram state directly, so canvas rendering stays in sync.
+ * - saveToHistory is called after any edit that should be undoable.
+ * - generatedFiles / selectedFileIndex / setSelectedFileIndex connect
+ *   the Code tab to the output of CodeGenerator.splitIntoFiles() in
+ *   UMLEditor.jsx.
+ * ============================================================
+ */
+
 import React, { useState, useEffect } from 'react';
 import { Trash2 } from 'lucide-react';
+
+/**
+ * PropertiesPanel({ ...props })
+ * ------------------------------
+ * LAYMAN'S: The outer panel component. Manages the Properties / Generated
+ *   Code tab toggle and uses a useEffect to keep the displayed code in
+ *   sync with the selected file tab or the latest generated output.
+ *
+ * TECHNICAL: Owns the currentCode local state (derived/synced from
+ *   generatedFiles + selectedFileIndex via useEffect). Delegates
+ *   rendering to ElementProperties, ConnectionProperties, or placeholder
+ *   text depending on what is selected in the diagram.
+ *
+ * @param {boolean}  showCodePanel          - True when the Code tab is active
+ * @param {Function} setShowCodePanel       - Switches between Properties/Code tabs
+ * @param {Array}    selectedElements       - Currently selected element objects
+ * @param {Object}   selectedConnection     - Currently selected connection object
+ * @param {Array}    elements               - Full element list from UMLEditor
+ * @param {Array}    connections            - Full connection list from UMLEditor
+ * @param {Function} setElements            - Updates the element list in UMLEditor
+ * @param {Function} setSelectedElements    - Updates the selection in UMLEditor
+ * @param {Function} setConnections         - Updates the connection list in UMLEditor
+ * @param {Function} setSelectedConnection  - Updates the selected connection in UMLEditor
+ * @param {Function} saveToHistory          - Commits the current state to undo history
+ * @param {string}   generatedCode          - Single-string fallback generated code
+ * @param {Array}    generatedFiles         - Array of { filename, content } objects
+ * @param {number}   selectedFileIndex      - Index of the active file tab
+ * @param {Function} setSelectedFileIndex   - Changes the active file tab
+ */
 
 const PropertiesPanel = ({
   showCodePanel,
@@ -18,6 +91,16 @@ const PropertiesPanel = ({
   selectedFileIndex = 0,
   setSelectedFileIndex = () => {}
 }) => {
+  /**
+   * currentCode / useEffect sync
+   * LAYMAN'S: Keeps the code display in sync whenever the user clicks a
+   *   different file tab or new code is generated. Without this, switching
+   *   file tabs would show stale code from the previous generation.
+   * TECHNICAL: Derived state pattern — currentCode is a local mirror of
+   *   generatedFiles[selectedFileIndex].content. The effect re-runs whenever
+   *   selectedFileIndex, generatedFiles, or generatedCode changes, ensuring
+   *   the displayed code always reflects the current selection.
+   */
   const [currentCode, setCurrentCode] = useState(generatedCode);
 
   // Update displayed code when file index changes or generatedFiles changes
@@ -28,6 +111,17 @@ const PropertiesPanel = ({
       setCurrentCode(generatedCode);
     }
   }, [selectedFileIndex, generatedFiles, generatedCode]);
+
+  /**
+   * updateElement(elementId, updates)
+   * LAYMAN'S: Applies a partial update (like a name change or new attribute)
+   *   to an element both in the master elements list and in the current
+   *   selection, so the properties form stays in sync with the canvas.
+   * TECHNICAL: Immutable update — maps over the elements array returning a
+   *   new array with only the matching element replaced via spread. Also
+   *   updates selectedElements so the form's controlled inputs reflect
+   *   the new values without a re-select.
+   */
   const updateElement = (elementId, updates) => {
     const updated = elements.map(el =>
       el.id === elementId ? { ...el, ...updates } : el
@@ -38,6 +132,15 @@ const PropertiesPanel = ({
     ));
   };
 
+  /**
+   * updateConnection(connectionId, updates)
+   * LAYMAN'S: Updates a connection's properties (label, multiplicity, roles)
+   *   both in the master connections list and in the selectedConnection so
+   *   the properties form stays in sync.
+   * TECHNICAL: Same immutable map pattern as updateElement. Also patches
+   *   selectedConnection directly to avoid a stale-closure issue where
+   *   the form would show the old value until the next render.
+   */
   const updateConnection = (connectionId, updates) => {
     const updated = connections.map(c =>
       c.id === connectionId ? { ...c, ...updates } : c
@@ -48,6 +151,15 @@ const PropertiesPanel = ({
     }
   };
 
+  /**
+   * deleteElement()
+   * LAYMAN'S: Removes all currently selected elements from the canvas and
+   *   also removes any connections that were attached to them — you can't
+   *   leave a dangling arrow pointing to nothing.
+   * TECHNICAL: Filters both arrays in one pass each. Calls saveToHistory()
+   *   so the deletion is undoable. Clears selectedElements afterward to
+   *   prevent the properties form from trying to display a deleted element.
+   */
   const deleteElement = () => {
     if (selectedElements.length === 0) return;
     const newElements = elements.filter(el => !selectedElements.some(sel => sel.id === el.id));
@@ -60,6 +172,13 @@ const PropertiesPanel = ({
     setSelectedElements([]);
   };
 
+  /**
+   * deleteConnection()
+   * LAYMAN'S: Removes the currently selected connection line from the
+   *   diagram and saves an undo snapshot.
+   * TECHNICAL: Filters connections by id, saves to history, then
+   *   sets selectedConnection to null to clear the properties form.
+   */
   const deleteConnection = () => {
     if (!selectedConnection) return;
     const updated = connections.filter(c => c.id !== selectedConnection.id);
@@ -184,6 +303,30 @@ const PropertiesPanel = ({
   );
 };
 
+/**
+ * ElementProperties({ element, onUpdate, onDelete, saveToHistory })
+ * -------------------------------------------------------------------
+ * LAYMAN'S: The form that appears in the Properties tab when a single
+ *   class, interface, abstract class, or object is selected on the canvas.
+ *   It lets the user rename the element, pick a stereotype, resize it,
+ *   and manage its attributes and methods — adding, removing, and editing
+ *   each one with visibility selectors, type dropdowns, and checkboxes
+ *   for static/abstract flags. Custom types are supported via a fallback
+ *   text input that appears when "Custom..." is chosen from the dropdown.
+ *
+ * TECHNICAL: Stateless helper — all state lives in the parent elements
+ *   array via onUpdate. Local helper functions (updateAttribute,
+ *   addAttribute, removeAttribute, updateMethod, addMethod, removeMethod)
+ *   are defined inline to avoid prop-drilling and keep the mutation
+ *   logic close to the form fields that trigger it.
+ *   saveToHistory() is called on blur and on discrete actions (add/remove)
+ *   so intermediate keystrokes don't flood the undo stack.
+ *
+ * @param {Object}   element         - The element data object being edited
+ * @param {Function} onUpdate        - Applies partial updates to the element
+ * @param {Function} onDelete        - Deletes the element from the diagram
+ * @param {Function} saveToHistory   - Commits current state to undo history
+ */
 const ElementProperties = ({ element, onUpdate, onDelete, saveToHistory }) => {
   // Minimal set of common types
   const commonTypes = ['String', 'int', 'double', 'boolean', 'void', 'Object', 'List'];
@@ -566,6 +709,26 @@ const ElementProperties = ({ element, onUpdate, onDelete, saveToHistory }) => {
   );
 };
 
+/**
+ * ConnectionProperties({ connection, onUpdate, onDelete, saveToHistory })
+ * -------------------------------------------------------------------------
+ * LAYMAN'S: The form that appears in the Properties tab when a connection
+ *   line is selected on the canvas. It shows the connection type (read-only),
+ *   and lets the user set "From Multiplicity" (e.g., "1"), "To Multiplicity"
+ *   (e.g., "*"), a relationship label (e.g., "owns"), and role names at
+ *   each end. All of these appear as annotations on the line in the diagram.
+ *
+ * TECHNICAL: Stateless helper component. The connection type field is
+ *   intentionally disabled — type is set when the line is drawn and is
+ *   not editable after the fact (it would require re-routing the arrow).
+ *   onUpdate patches only the changed field so unedited fields are preserved.
+ *   saveToHistory() is called on blur so each discrete edit is undoable.
+ *
+ * @param {Object}   connection     - The connection data object being edited
+ * @param {Function} onUpdate       - Applies partial updates to the connection
+ * @param {Function} onDelete       - Removes the connection from the diagram
+ * @param {Function} saveToHistory  - Commits current state to undo history
+ */
 const ConnectionProperties = ({ connection, onUpdate, onDelete, saveToHistory }) => {
   return (
     <div className="space-y-3">

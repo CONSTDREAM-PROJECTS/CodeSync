@@ -1,5 +1,70 @@
+/**
+ * ============================================================
+ * DiagramToolbar.jsx — Top Toolbar Component
+ * ============================================================
+ *
+ * WHAT THIS FILE DOES (Layman's):
+ * This is the horizontal toolbar strip at the very top of the editor.
+ * It holds the language dropdown, file operations (New, Import, Export),
+ * Undo/Redo buttons, zoom controls, grid toggle, and the two primary
+ * action buttons — "Code to Diagram" (import source code) and
+ * "Generate Code" (export to source code). Some controls are hidden
+ * or relabeled automatically depending on which diagram type is active.
+ *
+ * TECHNICAL OVERVIEW:
+ * A stateless React functional component. All toolbar state lives in
+ * UMLEditor.jsx and is passed down as props. Three computed values
+ * are derived from the selectedDiagram prop at render time:
+ *   - supportsCodeImport:    hides "Code to Diagram" for non-class diagrams
+ *   - supportsLanguageSelect: hides the language dropdown for non-class diagrams
+ *   - generateButtonLabel/Title: adapts the Generate button label/tooltip
+ *     ("Generate Code" for class, "Generate Docs" for others)
+ *
+ * HOW IT RELATES TO THE REST OF THE CODEBASE:
+ * - Rendered by UMLEditor.jsx directly below the DiagramSidebar.
+ * - zoom and showGrid values originate from useCanvasInteractions.js
+ *   and flow through UMLEditor.jsx as props.
+ * - canUndo / canRedo originate from useHistory.js and disable the
+ *   Undo/Redo buttons when the history stack is at its boundaries.
+ * - onGenerateCode triggers CodeGenerator.splitIntoFiles() in UMLEditor.
+ * - onCodeToUML opens the CodeImportModal.
+ * ============================================================
+ */
+
 import React from 'react';
 import { Download, Upload, Save, Code, ZoomIn, ZoomOut, Grid, Undo, Redo, FileCode } from 'lucide-react';
+
+/**
+ * DiagramToolbar({ ...props })
+ * -----------------------------
+ * LAYMAN'S: The toolbar component itself. Renders two groups of controls
+ *   separated by dividers: the left group (language, file ops, undo/redo,
+ *   zoom, grid) and the right group (Code to Diagram, Generate Code/Docs).
+ *   Certain controls are conditionally shown based on selectedDiagram.
+ *
+ * TECHNICAL: Pure/presentational. Derives supportsCodeImport,
+ *   supportsLanguageSelect, generateButtonLabel, and generateButtonTitle
+ *   from selectedDiagram before rendering so all branching is resolved
+ *   once per render rather than inline in JSX.
+ *
+ * @param {string}   language           - Active code language ("Java"|"Python"|"JavaScript")
+ * @param {Function} setLanguage        - Setter for language state in UMLEditor
+ * @param {Function} onNew              - Clears the canvas
+ * @param {Function} onImport           - Handles .json file import
+ * @param {Function} onExport           - Exports diagram as .json
+ * @param {Function} onGenerateCode     - Triggers code/doc generation
+ * @param {Function} onCodeToUML        - Opens CodeImportModal
+ * @param {number}   zoom               - Current zoom level (e.g., 1 = 100%)
+ * @param {Function} onZoomIn           - Increments zoom
+ * @param {Function} onZoomOut          - Decrements zoom
+ * @param {boolean}  showGrid           - Whether the grid overlay is visible
+ * @param {Function} onToggleGrid       - Toggles grid visibility
+ * @param {Function} onUndo             - Steps back in history
+ * @param {Function} onRedo             - Steps forward in history
+ * @param {boolean}  canUndo            - False when at the start of history
+ * @param {boolean}  canRedo            - False when at the end of history
+ * @param {string}   selectedDiagram    - Active diagram id (e.g., "class")
+ */
 
 const DiagramToolbar = ({
   language,
@@ -20,12 +85,31 @@ const DiagramToolbar = ({
   canRedo,
   selectedDiagram = 'class'
 }) => {
+  /**
+   * supportsCodeImport / supportsLanguageSelect
+   * LAYMAN'S: Some toolbar controls only make sense for class diagrams.
+   *   "Code to Diagram" lets you import source code — that only applies
+   *   to class diagrams. The language dropdown only applies to class
+   *   diagrams too, since use-case and sequence diagrams produce
+   *   language-agnostic Markdown documentation.
+   * TECHNICAL: Boolean flags derived once per render from selectedDiagram.
+   *   Used to conditionally render JSX blocks further down.
+   */
   // "Code to Diagram" import — only meaningful for class diagrams
   const supportsCodeImport = selectedDiagram === 'class';
 
   // Language selector — only class diagrams produce language-specific code
   const supportsLanguageSelect = selectedDiagram === 'class';
 
+  /**
+   * generateButtonLabel / generateButtonTitle
+   * LAYMAN'S: The right-side primary button says "Generate Code" for
+   *   class diagrams and "Generate Docs" for use-case and sequence
+   *   diagrams, since those produce Markdown documentation instead
+   *   of source code.
+   * TECHNICAL: Ternary expressions evaluated at render time.
+   *   Both are passed as children/title to the same JSX button element.
+   */
   // Button label + tooltip per diagram type
   const generateButtonLabel = selectedDiagram === 'class'
     ? 'Generate Code'

@@ -1,4 +1,51 @@
+/**
+ * ============================================================
+ * DiagramSidebar.jsx — Diagram Type Navigation Sidebar
+ * ============================================================
+ *
+ * WHAT THIS FILE DOES (Layman's):
+ * This is the left-hand panel in the editor that lists all the
+ * available UML diagram types (Class, Use Case, Sequence, etc.)
+ * grouped into "Structural" and "Behavioral" categories. Clicking
+ * a diagram name switches the canvas to that diagram type. At the
+ * bottom it also shows a quick-reference card explaining which
+ * algorithms power the two core features of the tool.
+ *
+ * TECHNICAL OVERVIEW:
+ * A stateless React functional component — it receives all data
+ * as props and emits selection events upward. No local state.
+ * Renders two filtered lists of diagramTypes by category, with
+ * active-state styling driven by the selectedDiagram prop.
+ *
+ * HOW IT RELATES TO THE REST OF THE CODEBASE:
+ * - Rendered inside UMLEditor.jsx as the fixed left sidebar.
+ * - diagramTypes array is defined in diagramUtils.js and passed
+ *   down via UMLEditor.jsx.
+ * - onDiagramSelect bubbles up to UMLEditor.jsx's handleDiagramSelect,
+ *   which resets the selected tool and connection state before
+ *   switching the active diagram.
+ * ============================================================
+ */
+
 import React from 'react';
+
+/**
+ * DiagramSidebar({ diagramTypes, selectedDiagram, onDiagramSelect })
+ * --------------------------------------------------------------------
+ * LAYMAN'S: The sidebar component itself. Loops over the diagramTypes
+ *   list twice — once for Structural, once for Behavioral — and renders
+ *   a clickable button for each. The currently active diagram is
+ *   highlighted. A static info card at the bottom describes the two
+ *   core algorithms (Rule-Based Transformation and Bidirectional Sync).
+ *
+ * TECHNICAL: Pure/presentational component. All visual state (which
+ *   button is active) is derived from the selectedDiagram prop rather
+ *   than local state — the parent owns the selection truth.
+ *
+ * @param {Array}    diagramTypes     - Array of { id, name, category } objects
+ * @param {string}   selectedDiagram  - Currently active diagram id (e.g., "class")
+ * @param {Function} onDiagramSelect  - Callback invoked with the selected diagram id
+ */
 
 const DiagramSidebar = ({ diagramTypes, selectedDiagram, onDiagramSelect }) => {
   return (
