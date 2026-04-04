@@ -1,109 +1,220 @@
 /**
  * ============================================================
- * LoginModal.jsx — Login / Authentication Modal
+ * LoginModal.jsx — Authentication Modal (Firebase Auth)
  * ============================================================
  *
  * WHAT THIS FILE DOES (Layman's):
- * This is the login popup that appears when a user tries to
- * access a feature that requires an account (like saving a
- * diagram to the cloud or uploading files). It presents a
- * clean login form with email/password fields, social login
- * buttons for GitHub and Google, a password reset link, and
- * a "Create An Account" option. Currently it is a UI placeholder
- * — the actual backend authentication is wired up separately.
+ * This is the login popup with real authentication. Users can sign
+ * in with email + password, or with GitHub / Google via OAuth.
+ * On success a Firebase user session is created, which lets the
+ * app save and load diagrams from the cloud (via diagramService.js).
+ * On failure the exact Firebase error is shown inline so the user
+ * knows what went wrong (wrong password, no account, etc.).
  *
  * TECHNICAL OVERVIEW:
- * A React functional component with minimal local state:
- *   - email / password: controlled input values (useState).
- *   - handleLogin: form submit handler that logs the attempt
- *     and closes the modal; real auth integration is a TODO.
- * Social login buttons (GitHub, Google) are rendered but not
- * connected — marked with "not connected" in their titles.
+ * Uses Firebase Auth SDK (v9 modular). Three auth paths:
+ *   1. Email/password  — signInWithEmailAndPassword()
+ *   2. Google OAuth    — signInWithPopup(GoogleAuthProvider)
+ *   3. GitHub OAuth    — signInWithPopup(GithubAuthProvider)
+ * All three call onLoginSuccess(user) on success, which UMLEditor
+ * uses to set the logged-in user state. Errors are caught and
+ * displayed inline — no alert() calls.
+ *
+ * SETUP REQUIRED:
+ * Create src/firebase.js with your Firebase project config:
+ *   import { initializeApp } from 'firebase/app';
+ *   import { getAuth } from 'firebase/auth';
+ *   const app = initializeApp({ apiKey: '...', ... });
+ *   export const auth = getAuth(app);
  *
  * HOW IT RELATES TO THE REST OF THE CODEBASE:
- * - Conditionally rendered by UMLEditor.jsx when authentication
- *   is required for a gated action.
- * - onClose is called both on successful login and when the user
- *   clicks outside the modal overlay.
- * - Backend auth (JWT, OAuth) would be added inside handleLogin()
- *   without changing the component's external contract.
+ * - Rendered by UMLEditor.jsx when showLoginModal is true.
+ * - onLoginSuccess(user) passes the Firebase User object up to
+ *   UMLEditor, which stores it in currentUser state.
+ * - diagramService.js uses currentUser.uid to scope cloud saves.
  * ============================================================
  */
 
 import React, { useState } from 'react';
-import { Github, Chrome } from 'lucide-react';
+import { Github, Chrome, Loader } from 'lucide-react';
 
 /**
- * LoginModal({ onClose })
- * ------------------------
- * LAYMAN'S: The modal component itself. Renders an overlay that
- *   dismisses on outside-click and a centered card with the full
- *   login form including email, password, social buttons, and links.
+ * LoginModal({ onClose, onLoginSuccess })
+ * ----------------------------------------
+ * LAYMAN'S: The modal itself. Three ways to log in: email/password,
+ *   Google, or GitHub. Shows a spinner while authenticating and
+ *   displays any error inline.
  *
- * TECHNICAL: Controlled form — email and password are held in local
- *   useState. handleLogin prevents the default form submission,
- *   logs the request (placeholder), and calls onClose(). All social
- *   buttons are type="button" to prevent accidental form submission.
+ * TECHNICAL: All auth calls are async/await wrapped in try/catch.
+ *   Firebase error codes are mapped to user-friendly messages.
+ *   The modal stays open on error so the user can correct and retry.
  *
- * @param {Function} onClose - Callback to unmount the modal
+ * @param {Function} onClose        - Dismiss the modal without logging in
+ * @param {Function} onLoginSuccess - Called with Firebase User on success
  */
-
-const LoginModal = ({ onClose }) => {
-  const [email, setEmail] = useState('');
+const LoginModal = ({ onClose, onLoginSuccess }) => {
+  const [email, setEmail]       = useState('');
   const [password, setPassword] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError]       = useState('');
+  const [mode, setMode]         = useState('login'); // 'login' | 'register'
 
   /**
-   * handleLogin(e)
-   * LAYMAN'S: Called when the user clicks "Log In". Currently just
-   *   logs the email and closes the modal — full authentication
-   *   (password hashing, JWT tokens, session management) is a
-   *   backend integration task marked as TODO.
-   * TECHNICAL: e.preventDefault() stops the browser from doing a full
-   *   page form POST. The console.log is a deliberate placeholder marker.
-   *   Replace the body with an API call to the auth endpoint to complete
-   *   the integration.
+   * friendlyError(code)
+   * LAYMAN'S: Translates Firebase's technical error codes into plain English.
+   * TECHNICAL: Maps common Firebase Auth error codes to user-facing strings.
    */
-  const handleLogin = (e) => {
+  const friendlyError = (code) => {
+    const map = {
+      'auth/user-not-found':       'No account found with this email.',
+      'auth/wrong-password':       'Incorrect password. Please try again.',
+      'auth/email-already-in-use': 'An account with this email already exists.',
+      'auth/weak-password':        'Password must be at least 6 characters.',
+      'auth/invalid-email':        'Please enter a valid email address.',
+      'auth/popup-closed-by-user': 'Sign-in popup was closed. Please try again.',
+      'auth/cancelled-popup-request': 'Only one sign-in popup can be open at a time.',
+      'auth/network-request-failed': 'Network error — check your connection.',
+    };
+    return map[code] || 'Authentication failed. Please try again.';
+  };
+
+  /**
+   * handleEmailAuth(e)
+   * LAYMAN'S: Handles the email/password form submit. Calls Firebase to
+   *   sign in (or create an account in register mode), then closes the
+   *   modal and passes the user object up to UMLEditor.
+   * TECHNICAL: Dynamically imports Firebase functions to keep the bundle
+   *   lean — auth SDK is only loaded when the modal is opened.
+   */
+  const handleEmailAuth = async (e) => {
     e.preventDefault();
-    // Placeholder: in-app saving/upload requires auth — integrate with backend later
-    console.log('Login requested', email);
-    onClose();
+    if (!email.trim() || !password.trim()) {
+      setError('Please enter both email and password.');
+      return;
+    }
+    setIsLoading(true);
+    setError('');
+    try {
+      const { auth } = await import('../firebase');
+      const { signInWithEmailAndPassword, createUserWithEmailAndPassword } = await import('firebase/auth');
+      const fn = mode === 'register' ? createUserWithEmailAndPassword : signInWithEmailAndPassword;
+      const result = await fn(auth, email.trim(), password);
+      onLoginSuccess?.(result.user);
+      onClose();
+    } catch (err) {
+      setError(friendlyError(err.code));
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  /**
+   * handleProviderAuth(providerName)
+   * LAYMAN'S: Opens a browser popup for Google or GitHub sign-in.
+   *   The user picks their account in the popup and is then logged in.
+   * TECHNICAL: Uses Firebase signInWithPopup with the appropriate provider.
+   *   Provider instances are created fresh each call (safe for popup flow).
+   */
+  const handleProviderAuth = async (providerName) => {
+    setIsLoading(true);
+    setError('');
+    try {
+      const { auth } = await import('../firebase');
+      const { signInWithPopup, GoogleAuthProvider, GithubAuthProvider } = await import('firebase/auth');
+      const provider = providerName === 'google' ? new GoogleAuthProvider() : new GithubAuthProvider();
+      const result = await signInWithPopup(auth, provider);
+      onLoginSuccess?.(result.user);
+      onClose();
+    } catch (err) {
+      setError(friendlyError(err.code));
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   return (
     <div className="modal-overlay" onClick={onClose}>
       <div className="login-card" onClick={(e) => e.stopPropagation()}>
+
+        {/* Logo */}
         <div className="login-logo">
-          <img src="/const_dream_logo.png" alt="CodeSync" onError={(e)=>{e.target.style.display='none'}} />
+          <img src="/const_dream_logo.png" alt="CodeSync" onError={(e) => { e.target.style.display = 'none'; }} />
         </div>
-        <form onSubmit={handleLogin} className="login-form">
+
+        {/* Mode toggle */}
+        <div className="flex border border-[#3e3e42] rounded-lg overflow-hidden mb-4">
+          <button
+            type="button"
+            onClick={() => { setMode('login'); setError(''); }}
+            className={`flex-1 py-1.5 text-sm transition-colors ${mode === 'login' ? 'bg-[#007acc] text-white' : 'bg-[#2d2d30] text-gray-400 hover:text-white'}`}
+          >
+            Log In
+          </button>
+          <button
+            type="button"
+            onClick={() => { setMode('register'); setError(''); }}
+            className={`flex-1 py-1.5 text-sm transition-colors ${mode === 'register' ? 'bg-[#007acc] text-white' : 'bg-[#2d2d30] text-gray-400 hover:text-white'}`}
+          >
+            Create Account
+          </button>
+        </div>
+
+        <form onSubmit={handleEmailAuth} className="login-form">
           <input
-            type="text"
-            placeholder=""
+            type="email"
+            placeholder="Email"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
             className="login-input"
             autoFocus
+            disabled={isLoading}
           />
           <input
             type="password"
-            placeholder=""
+            placeholder="Password"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             className="login-input"
+            disabled={isLoading}
           />
 
-          <div className="login-help">want to reset your password?</div>
+          {/* Inline error */}
+          {error && (
+            <div className="bg-red-900 border border-red-700 text-red-200 text-xs px-3 py-2 rounded-lg">
+              {error}
+            </div>
+          )}
 
-          <button className="login-btn" type="submit">Log In</button>
+          {mode === 'login' && (
+            <div className="login-help">Forgot your password?</div>
+          )}
 
-          <div className="login-or"> <span/> or log in with <span/></div>
+          <button className="login-btn flex items-center justify-center gap-2" type="submit" disabled={isLoading}>
+            {isLoading ? <><Loader size={14} className="animate-spin" /> Authenticating...</> : mode === 'login' ? 'Log In' : 'Create Account'}
+          </button>
+
+          <div className="login-or"><span /> or continue with <span /></div>
+
           <div className="login-socials">
-            <button type="button" className="social-btn" title="GitHub (not connected)"><Github /></button>
-            <button type="button" className="social-btn" title="Google (not connected)"><Chrome /></button>
+            <button
+              type="button"
+              className="social-btn"
+              title="Sign in with GitHub"
+              onClick={() => handleProviderAuth('github')}
+              disabled={isLoading}
+            >
+              <Github size={18} />
+            </button>
+            <button
+              type="button"
+              className="social-btn"
+              title="Sign in with Google"
+              onClick={() => handleProviderAuth('google')}
+              disabled={isLoading}
+            >
+              <Chrome size={18} />
+            </button>
           </div>
-
-          <div className="create-account">Create An Account.</div>
         </form>
       </div>
     </div>

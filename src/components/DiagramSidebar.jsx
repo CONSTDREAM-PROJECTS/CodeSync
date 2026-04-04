@@ -49,7 +49,7 @@ import React from 'react';
 
 const DiagramSidebar = ({ diagramTypes, selectedDiagram, onDiagramSelect }) => {
   return (
-    <div className="w-64 flex-shrink-0 bg-[#252526] border-r border-[#3e3e42] overflow-y-auto">
+    <div className="w-56 flex-shrink-0 bg-[#252526] border-r border-[#3e3e42] overflow-y-auto" style={{minWidth: "180px", maxWidth: "224px"}}>
       <div className="p-4 border-b border-[#3e3e42]">
         <h2 className="text-sm font-semibold text-gray-400 mb-3">UML DIAGRAMS</h2>
       </div>
@@ -61,13 +61,14 @@ const DiagramSidebar = ({ diagramTypes, selectedDiagram, onDiagramSelect }) => {
           <button
             key={diagram.id}
             onClick={() => onDiagramSelect(diagram.id)}
-            className={`w-full text-left px-3 py-2 text-sm rounded transition-colors ${
+            className={`w-full text-left px-3 py-2 text-sm rounded transition-colors truncate ${
               selectedDiagram === diagram.id
                 ? 'bg-[#37373d] text-white'
                 : 'text-gray-300 hover:bg-[#2a2d2e]'
             }`}
+            title={diagram.name}
           >
-            {diagram.name}
+            <span className="truncate block">{diagram.name}</span>
           </button>
         ))}
       </div>
@@ -79,13 +80,14 @@ const DiagramSidebar = ({ diagramTypes, selectedDiagram, onDiagramSelect }) => {
           <button
             key={diagram.id}
             onClick={() => onDiagramSelect(diagram.id)}
-            className={`w-full text-left px-3 py-2 text-sm rounded transition-colors ${
+            className={`w-full text-left px-3 py-2 text-sm rounded transition-colors truncate ${
               selectedDiagram === diagram.id
                 ? 'bg-[#37373d] text-white'
                 : 'text-gray-300 hover:bg-[#2a2d2e]'
             }`}
+            title={diagram.name}
           >
-            {diagram.name}
+            <span className="truncate block">{diagram.name}</span>
           </button>
         ))}
       </div>

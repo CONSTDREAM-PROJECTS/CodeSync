@@ -42,8 +42,80 @@
  * ============================================================
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { Trash2 } from 'lucide-react';
+
+/**
+ * Fix #18: Lightweight syntax highlighter — no external library needed.
+ * Tokenises Java / Python / JavaScript source into coloured spans.
+ * Returns an array of { text, className } tokens.
+ */
+const KEYWORDS = {
+  Java: ['abstract','assert','boolean','break','byte','case','catch','char','class',
+         'const','continue','default','do','double','else','enum','extends','final',
+         'finally','float','for','goto','if','implements','import','instanceof','int',
+         'interface','long','native','new','null','package','private','protected',
+         'public','return','short','static','strictfp','super','switch','synchronized',
+         'this','throw','throws','transient','try','void','volatile','while','true','false'],
+  Python: ['and','as','assert','async','await','break','class','continue','def','del',
+           'elif','else','except','finally','for','from','global','if','import','in',
+           'is','lambda','None','nonlocal','not','or','pass','raise','return','True',
+           'False','try','while','with','yield','self','super'],
+  JavaScript: ['async','await','break','case','catch','class','const','continue',
+               'debugger','default','delete','do','else','export','extends','finally',
+               'for','from','function','if','import','in','instanceof','let','new',
+               'null','of','return','static','super','switch','this','throw','true',
+               'false','try','typeof','undefined','var','void','while','with','yield'],
+};
+
+/**
+ * highlightCode(code, language)
+ * Returns an array of token objects: { text, type }
+ * type: 'keyword' | 'string' | 'comment' | 'number' | 'plain'
+ */
+function highlightCode(code, language) {
+  if (!code) return [];
+  const kwSet = new Set(KEYWORDS[language] || KEYWORDS.Java);
+  const tokens = [];
+
+  // Simple regex tokeniser — processes code left to right
+  const regex = /(\/\/[^\n]*|\/\*[\s\S]*?\*\/|#[^\n]*)|("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|`(?:[^`\\]|\\.)*`)|(\b\d+\.?\d*\b)|([A-Za-z_$][A-Za-z0-9_$]*)|(\s+)|([^\w\s])/g;
+  let match;
+  while ((match = regex.exec(code)) !== null) {
+    const [full, comment, str, num, word, space, other] = match;
+    if (comment)      tokens.push({ text: full, type: 'comment' });
+    else if (str)     tokens.push({ text: full, type: 'string' });
+    else if (num)     tokens.push({ text: full, type: 'number' });
+    else if (word)    tokens.push({ text: full, type: kwSet.has(full) ? 'keyword' : 'plain' });
+    else              tokens.push({ text: full, type: 'plain' });
+  }
+  return tokens;
+}
+
+const TOKEN_COLORS = {
+  keyword: '#569cd6',   // blue  — keywords
+  string:  '#ce9178',   // orange — strings
+  comment: '#6a9955',   // green  — comments
+  number:  '#b5cea8',   // light green — numbers
+  plain:   '#d4d4d4',   // light grey — identifiers/operators
+};
+
+/**
+ * SyntaxHighlightedCode({ code, language })
+ * Renders a <pre> with inline-colored spans for each token.
+ */
+const SyntaxHighlightedCode = ({ code, language }) => {
+  const tokens = useMemo(() => highlightCode(code, language), [code, language]);
+  return (
+    <pre className="flex-1 bg-[#1e1e1e] p-3 rounded text-xs overflow-auto font-mono leading-relaxed" style={{tabSize: 2}}>
+      {tokens.map((tok, i) => (
+        <span key={i} style={{ color: TOKEN_COLORS[tok.type] || TOKEN_COLORS.plain }}>
+          {tok.text}
+        </span>
+      ))}
+    </pre>
+  );
+};
 
 /**
  * PropertiesPanel({ ...props })
@@ -77,6 +149,7 @@ import { Trash2 } from 'lucide-react';
 const PropertiesPanel = ({
   showCodePanel,
   setShowCodePanel,
+  language,
   selectedElements,
   selectedConnection,
   elements,
@@ -286,9 +359,7 @@ const PropertiesPanel = ({
             )}
 
             {currentCode ? (
-              <pre className="flex-1 bg-[#1e1e1e] p-3 rounded text-xs overflow-auto font-mono">
-                <code className="text-green-400">{currentCode}</code>
-              </pre>
+              <SyntaxHighlightedCode code={currentCode} language={language || 'Java'} />
             ) : (
               <div className="flex-1 flex items-center justify-center">
                 <p className="text-sm text-gray-500 text-center">

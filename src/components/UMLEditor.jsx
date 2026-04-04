@@ -58,6 +58,9 @@
 import React, { useState, useRef, useEffect } from 'react';
 import CodeGenerator from '../services/codeGenerator';
 import CodeToUMLConverter from '../services/codeToUMLConverter';
+import TokenizationService from '../services/TokenizationService';
+import ValidationService from '../services/ValidationService';
+import DiagramService from '../services/diagramService';
 import { useHistory } from '../hooks/useHistory';
 import { useCanvasInteractions } from '../hooks/useCanvasInteractions';
 import { diagramTypes, getToolbarItems } from '../utils/diagramUtils';
@@ -66,6 +69,9 @@ import DiagramToolbar from './DiagramToolbar';
 import ToolPalette from './ToolPalette';
 import PropertiesPanel from './PropertiesPanel';
 import CodeImportModal from './CodeImportModal';
+import ValidationPanel from './ValidationPanel';
+import LoginModal from './LoginModal';
+import { ToastContainer, useToast } from './Toast';
 
 /**
  * UMLEditor()
@@ -130,20 +136,50 @@ const UMLEditor = () => {
   // ── Modal state ────────────────────────────────────────────
   // showCodeImportModal: controls visibility of the CodeImportModal overlay.
   const [showCodeImportModal, setShowCodeImportModal] = useState(false);
+  // showLoginModal: controls visibility of the LoginModal overlay.
+  const [showLoginModal, setShowLoginModal] = useState(false);
+
+  // ── Inline rename state (Fix #19) ─────────────────────────
+  // inlineEditId: id of the element currently being renamed inline on the canvas.
+  // inlineEditValue: current text in the inline input box.
+  const [inlineEditId, setInlineEditId] = useState(null);
+  const [inlineEditValue, setInlineEditValue] = useState('');
+  const inlineInputRef = useRef(null);
+
+  // ── Mouse position for live connection line (Fix #11) ──────
+  const [mousePos, setMousePos] = useState({ x: 0, y: 0 });
+
+  // ── Toast notifications (Fix #12) ─────────────────────────
+  const { toasts, showToast, removeToast } = useToast();
+
+  // ── Auth + persistence state ───────────────────────────────
+  // currentUser: Firebase User object when logged in, null otherwise.
+  // diagramId: stable id for this diagram session used as the Firestore key.
+  const [currentUser, setCurrentUser] = useState(null);
+  const [diagramId] = useState(() => `diagram_${Date.now()}`);
+
+  // ── Validation state ───────────────────────────────────────
+  // validationResult: the result object from ValidationService.validate().
+  // showValidationPanel: controls visibility of the inline error panel.
+  const [validationResult, setValidationResult] = useState(null);
+  const [showValidationPanel, setShowValidationPanel] = useState(false);
 
   // ── Custom hooks ───────────────────────────────────────────
   // useHistory provides saveToHistory, undo, redo, resetHistory, canUndo, canRedo.
   // useCanvasInteractions provides drag, pan, zoom, grid helpers and canvasRef.
-  const { saveToHistory, undo, redo, resetHistory, canUndo, canRedo } = useHistory();
+  // Fix #15: seed useHistory with initial state so first Ctrl+Z doesn't go to empty canvas
+  const { saveToHistory, undo, redo, resetHistory, canUndo, canRedo } = useHistory(elements, connections);
   const {
     isDragging,
     isPanning,
     panOffset,
+    setPanOffset,
     zoom,
     showGrid,
     canvasRef,
     handleZoomIn,
     handleZoomOut,
+    handleWheelZoom,
     toggleGrid,
     startPanning,
     updatePan,
@@ -164,6 +200,36 @@ const UMLEditor = () => {
    *   Keys are composite strings: `${id}-${attrCount}-${methodCount}-${stereotype}`.
    */
   const elementHeightCache = useRef(new Map());
+
+  /**
+   * dragStartPositions
+   * LAYMAN'S: When dragging multiple selected elements, we need to remember
+   *   where each one started so they all move together as a group.
+   * TECHNICAL: Map of elementId -> { x, y } snapshot taken at mousedown.
+   *   Cleared on mouseup. Only populated when selectedElements.length > 1.
+   */
+  const dragStartPositions = useRef({});
+  const dragStartMouse = useRef({ x: 0, y: 0 });
+
+  /**
+   * autoSave useEffect
+   * LAYMAN'S: Automatically saves the diagram to the cloud 2 seconds
+   *   after any change, but only when the user is logged in. If not
+   *   logged in, changes are only kept in browser memory (lost on refresh).
+   * TECHNICAL: Calls DiagramService.autoSave() which is debounced — rapid
+   *   changes are collapsed into one save. Depends on elements, connections,
+   *   selectedDiagram, language, and currentUser.
+   */
+  useEffect(() => {
+    if (!currentUser) return;
+    DiagramService.autoSave(currentUser, diagramId, {
+      name:        `${diagramTypes.find(d => d.id === selectedDiagram)?.name || 'Diagram'}`,
+      diagramType: selectedDiagram,
+      language,
+      elements,
+      connections
+    });
+  }, [elements, connections, selectedDiagram, language, currentUser]);
 
   /**
    * copyElement()
@@ -259,22 +325,14 @@ const UMLEditor = () => {
       if (e.ctrlKey || e.metaKey) {
         if (e.key === 'z' && !e.shiftKey) {
           e.preventDefault();
-          const result = undo();
-          if (result) {
-            setElements(result.elements);
-            setConnections(result.connections);
-            setSelectedElements([]);
-            setSelectedConnection(null);
-          }
+          undo(setElements, setConnections);
+          setSelectedElements([]);
+          setSelectedConnection(null);
         } else if ((e.key === 'z' && e.shiftKey) || e.key === 'y') {
           e.preventDefault();
-          const result = redo();
-          if (result) {
-            setElements(result.elements);
-            setConnections(result.connections);
-            setSelectedElements([]);
-            setSelectedConnection(null);
-          }
+          redo(setElements, setConnections);
+          setSelectedElements([]);
+          setSelectedConnection(null);
         } else if (e.key === 'c') {
           e.preventDefault();
           copyElement();
@@ -282,15 +340,19 @@ const UMLEditor = () => {
           e.preventDefault();
           pasteElement();
         } else if (e.key === 'd') {
+          // Ctrl+D = Duplicate (not delete — Delete key already handles deletion)
           e.preventDefault();
           if (selectedElements.length > 0) {
-            const selectedIds = selectedElements.map(el => el.id);
-            const newElements = elements.filter(el => !selectedIds.includes(el.id));
-            const newConnections = connections.filter(c => !selectedIds.includes(c.from) && !selectedIds.includes(c.to));
-            setElements(newElements);
-            setConnections(newConnections);
-            saveToHistory(newElements, newConnections);
-            setSelectedElements([]);
+            const duplicated = selectedElements.map((el, index) => ({
+              ...JSON.parse(JSON.stringify(el)),
+              id: Date.now() + index,
+              x: el.x + 20,
+              y: el.y + 20,
+            }));
+            const updatedElements = [...elements, ...duplicated];
+            setElements(updatedElements);
+            saveToHistory(updatedElements, connections);
+            setSelectedElements(duplicated);
           }
         }
       } else if (e.key === 'Delete') {
@@ -527,23 +589,34 @@ const UMLEditor = () => {
     } else if (selectedTool === 'select') {
       // Multi-select logic
       if (e.ctrlKey || e.metaKey) {
-        // Toggle selection
         setSelectedElements(prev => {
           const isSelected = prev.some(el => el.id === element.id);
-          if (isSelected) {
-            return prev.filter(el => el.id !== element.id);
-          } else {
-            return [...prev, element];
-          }
+          if (isSelected) return prev.filter(el => el.id !== element.id);
+          return [...prev, element];
         });
       } else {
-        // Single selection
-        setSelectedElements([element]);
+        // If clicking an already-selected element in a multi-selection, keep selection
+        setSelectedElements(prev => {
+          const alreadySelected = prev.some(el => el.id === element.id);
+          return alreadySelected && prev.length > 1 ? prev : [element];
+        });
       }
       setSelectedConnection(null);
-      
-      // Only start dragging if single element is selected
+
+      // Start drag — works for single OR multi-select (Fix #10)
       if (!e.ctrlKey && !e.metaKey) {
+        const svgCoords = getCanvasCoordinates(e.clientX, e.clientY);
+        dragStartMouse.current = svgCoords;
+        // Snapshot positions of all currently selected elements
+        setSelectedElements(prev => {
+          dragStartPositions.current = {};
+          prev.forEach(el => {
+            dragStartPositions.current[el.id] = { x: el.x, y: el.y };
+          });
+          // Also include the clicked element itself
+          dragStartPositions.current[element.id] = { x: element.x, y: element.y };
+          return prev.length > 0 ? prev : [element];
+        });
         startDragging(element, e.clientX, e.clientY);
       }
     }
@@ -564,6 +637,12 @@ const UMLEditor = () => {
    *   All three paths clamp to minimum sizes (50×30) to prevent negative dimensions.
    */
   const handleMouseMove = (e) => {
+    // Fix #11: track mouse in SVG space for the live connection preview line
+    if (connectionStart) {
+      const svgCoords = getCanvasCoordinates(e.clientX, e.clientY);
+      setMousePos(svgCoords);
+    }
+
     if (isResizing && selectedElements.length === 1 && originalElement) {
       const deltaX = e.clientX - resizeStartPos.x;
       const deltaY = e.clientY - resizeStartPos.y;
@@ -624,8 +703,9 @@ const UMLEditor = () => {
     } else {
       updatePan(e.clientX, e.clientY);
 
-      const dragResult = updateDrag(selectedElements.length === 1 ? selectedElements[0] : null, e.clientX, e.clientY);
+      const dragResult = updateDrag(selectedElements.length >= 1 ? selectedElements[0] : null, e.clientX, e.clientY);
       if (dragResult && selectedElements.length === 1) {
+        // Single element drag (original path)
         const updatedElements = elements.map(el =>
           el.id === selectedElements[0].id
             ? { ...el, x: dragResult.x, y: dragResult.y }
@@ -633,6 +713,24 @@ const UMLEditor = () => {
         );
         setElements(updatedElements);
         setSelectedElements([{ ...selectedElements[0], x: dragResult.x, y: dragResult.y }]);
+      } else if (dragResult && selectedElements.length > 1) {
+        // Fix #10: Group drag — move ALL selected elements by the same delta
+        const svgCurrent = getCanvasCoordinates(e.clientX, e.clientY);
+        const dx = svgCurrent.x - dragStartMouse.current.x;
+        const dy = svgCurrent.y - dragStartMouse.current.y;
+        const updatedElements = elements.map(el => {
+          const startPos = dragStartPositions.current[el.id];
+          if (startPos) {
+            return { ...el, x: startPos.x + dx, y: startPos.y + dy };
+          }
+          return el;
+        });
+        setElements(updatedElements);
+        setSelectedElements(prev => prev.map(el => {
+          const startPos = dragStartPositions.current[el.id];
+          if (startPos) return { ...el, x: startPos.x + dx, y: startPos.y + dy };
+          return el;
+        }));
       }
     }
   };
@@ -647,12 +745,14 @@ const UMLEditor = () => {
    *   interaction state flags so the next interaction starts clean.
    */
   const handleMouseUp = () => {
-    if (isDragging && selectedElements.length === 1) {
+    if (isDragging && selectedElements.length >= 1) {
       saveToHistory(elements, connections);
     }
     if (isResizing && selectedElements.length === 1) {
       saveToHistory(elements, connections);
     }
+    // Clear group-drag snapshots
+    dragStartPositions.current = {};
     stopDragging();
     stopPanning();
     setIsResizing(false);
@@ -681,24 +781,99 @@ const UMLEditor = () => {
   };
 
   /**
+   * handleDoubleClick(e, element)
+   * LAYMAN'S: When the user double-clicks an element on the canvas,
+   *   a small text input appears right on top of the element's name
+   *   so they can rename it without opening the properties panel.
+   * TECHNICAL: Records the element id and current name into inlineEditId
+   *   and inlineEditValue. A foreignObject overlay is rendered in the SVG
+   *   at the element's position. Focus is set via a useEffect on inlineEditId.
+   */
+  const handleDoubleClick = (e, element) => {
+    e.stopPropagation();
+    setInlineEditId(element.id);
+    setInlineEditValue(element.name);
+    setTimeout(() => inlineInputRef.current?.focus(), 50);
+  };
+
+  /**
+   * commitInlineRename()
+   * LAYMAN'S: Saves the new name when the user presses Enter or clicks away.
+   * TECHNICAL: Calls updateElement then saveToHistory, then clears inlineEditId.
+   */
+  const commitInlineRename = () => {
+    if (inlineEditId && inlineEditValue.trim()) {
+      updateElement(inlineEditId, { name: inlineEditValue.trim() });
+      saveToHistory(
+        elements.map(el => el.id === inlineEditId ? { ...el, name: inlineEditValue.trim() } : el),
+        connections
+      );
+    }
+    setInlineEditId(null);
+    setInlineEditValue('');
+  };
+
+  /**
    * handleGenerateCode()
    * LAYMAN'S: Called when the user clicks "Generate Code" in the toolbar.
-   *   Runs the code generator on the current diagram, stores the result,
-   *   and switches the right panel to the "Generated Code" tab so the user
-   *   can immediately see and copy the output.
-   * TECHNICAL: Calls CodeGenerator.splitIntoFiles() which returns
-   *   Array<{ filename, content }>. Sets generatedFiles for the multi-file
-   *   tab UI and also sets generatedCode to files[0].content for backward
-   *   compatibility with any code that reads the single-string version.
-   *   Resets selectedFileIndex to 0 so the first file is shown.
+   *   Now runs the full pipeline: Tokenize → Validate → Generate.
+   *   If the diagram has errors, the ValidationPanel opens showing exactly
+   *   what is wrong and how to fix it. Code is only generated when the
+   *   diagram passes structural validation (canProceed is true).
+   * TECHNICAL: Calls TokenizationService.tokenize() first to produce the
+   *   token stream and symbol table. Then passes those to
+   *   ValidationService.validate(). If canProceed is true, calls
+   *   CodeGenerator.splitIntoFiles(). If not, opens the ValidationPanel
+   *   and returns early so the user sees the errors instead of broken code.
    */
   // Generate code
   const handleGenerateCode = () => {
-    // Use new file splitting feature for accurate code generation
+    // ── Step 1: Tokenize ──────────────────────────────────
+    const tokenizationResult = TokenizationService.tokenize(
+      { elements, connections },
+      selectedDiagram
+    );
+
+    if (!tokenizationResult.success) {
+      setValidationResult({
+        isValid: false,
+        canProceed: false,
+        allIssues: [{
+          severity: 'ERROR',
+          code: 'TOKENIZATION_FAILED',
+          elementRef: 'diagram',
+          title: 'Tokenization failed',
+          description: tokenizationResult.error,
+          recommendedAction: 'Check the diagram for unsupported element types.'
+        }],
+        stage1Errors: [],
+        stage2Warnings: [],
+        stage3Infos: [],
+        todoAnnotations: [],
+        summary: `Tokenization failed: ${tokenizationResult.error}`
+      });
+      setShowValidationPanel(true);
+      return;
+    }
+
+    // ── Step 2: Validate ──────────────────────────────────
+    const validation = ValidationService.validate(tokenizationResult, selectedDiagram);
+    setValidationResult(validation);
+
+    // Always show validation panel if there are any issues
+    if (validation.allIssues.length > 0) {
+      setShowValidationPanel(true);
+    }
+
+    // Hard stop on structural errors
+    if (!validation.canProceed) {
+      return;
+    }
+
+    // ── Step 3: Generate ──────────────────────────────────
     const files = CodeGenerator.splitIntoFiles(elements, connections, language, selectedDiagram);
     setGeneratedFiles(files);
-    
-    // Keep backward compatibility by setting generatedCode to first file
+
     if (files.length > 0) {
       setGeneratedCode(files[0].content);
       setSelectedFileIndex(0);
@@ -754,7 +929,7 @@ const UMLEditor = () => {
     );
     
     // Show success message
-    alert(`Successfully imported ${importedElements.length} classes from code!`);
+    showToast(`Successfully imported ${importedElements.length} classes from code!`, 'success');
   };
 
   /**
@@ -767,6 +942,64 @@ const UMLEditor = () => {
    *   to trigger the browser download, then revokes the URL to free memory.
    */
   // Export/Import functions
+  /**
+   * handleExportSVG()
+   * Fix #6: Export the diagram canvas as a downloadable SVG file by
+   * serializing the SVG DOM element directly — no external library needed.
+   */
+  const handleExportSVG = () => {
+    const svgEl = canvasRef.current;
+    if (!svgEl) return;
+    const serializer = new XMLSerializer();
+    const svgStr = serializer.serializeToString(svgEl);
+    const blob = new Blob([svgStr], { type: 'image/svg+xml;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${selectedDiagram}-diagram.svg`;
+    a.click();
+    URL.revokeObjectURL(url);
+    showToast('Diagram exported as SVG', 'success');
+  };
+
+  /**
+   * handleExportPNG()
+   * Fix #6: Renders the SVG into an off-screen <canvas> via an Image element,
+   * then exports that canvas as a PNG. No html2canvas dependency needed.
+   */
+  const handleExportPNG = () => {
+    const svgEl = canvasRef.current;
+    if (!svgEl) return;
+    const serializer = new XMLSerializer();
+    const svgStr = serializer.serializeToString(svgEl);
+    const svgBlob = new Blob([svgStr], { type: 'image/svg+xml;charset=utf-8' });
+    const url = URL.createObjectURL(svgBlob);
+    const img = new Image();
+    img.onload = () => {
+      const canvas = document.createElement('canvas');
+      const scale = 2; // 2× for retina-quality output
+      canvas.width  = svgEl.clientWidth  * scale;
+      canvas.height = svgEl.clientHeight * scale;
+      const ctx = canvas.getContext('2d');
+      ctx.fillStyle = '#1e1e1e';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.scale(scale, scale);
+      ctx.drawImage(img, 0, 0);
+      URL.revokeObjectURL(url);
+      const pngUrl = canvas.toDataURL('image/png');
+      const a = document.createElement('a');
+      a.href = pngUrl;
+      a.download = `${selectedDiagram}-diagram.png`;
+      a.click();
+      showToast('Diagram exported as PNG', 'success');
+    };
+    img.onerror = () => {
+      URL.revokeObjectURL(url);
+      showToast('PNG export failed — try SVG instead', 'error');
+    };
+    img.src = url;
+  };
+
   const handleExport = () => {
     const data = JSON.stringify({ 
       elements, 
@@ -809,7 +1042,7 @@ const UMLEditor = () => {
           setSelectedConnection(null);
           resetHistory(data.elements || [], data.connections || []);
         } catch (error) {
-          alert('Error loading file: Invalid JSON format');
+          showToast('Error loading file: Invalid JSON format', 'error');
         }
       };
       reader.readAsText(file);
@@ -859,7 +1092,7 @@ const UMLEditor = () => {
       />
 
       {/* Main Editor Area */}
-      <div className="flex-1 flex flex-col">
+      <div className="flex-1 min-w-0 flex flex-col">
         {/* Top Toolbar */}
         <DiagramToolbar
           language={language}
@@ -867,6 +1100,8 @@ const UMLEditor = () => {
           onNew={handleNew}
           onImport={handleImport}
           onExport={handleExport}
+          onExportSVG={handleExportSVG}
+          onExportPNG={handleExportPNG}
           onGenerateCode={handleGenerateCode}
           onCodeToUML={handleCodeToUML}
           zoom={zoom}
@@ -898,6 +1133,7 @@ const UMLEditor = () => {
             onMouseMove={handleMouseMove}
             onMouseUp={handleMouseUp}
             onMouseLeave={handleMouseUp}
+            onWheel={handleWheelZoom}
             style={{
               cursor: isPanning ? 'grabbing' : 
                       selectedTool === 'select' ? 'default' : 
@@ -915,6 +1151,50 @@ const UMLEditor = () => {
                 </defs>
                 <rect width="100%" height="100%" fill="url(#grid)" />
               </>
+            )}
+
+            {/* Empty state guidance — only shown when canvas has no elements */}
+            {elements.length === 0 && (
+              <g style={{ pointerEvents: 'none' }}>
+                <text
+                  x="50%"
+                  y="44%"
+                  textAnchor="middle"
+                  fill="#3e3e42"
+                  fontSize="48"
+                  fontWeight="bold"
+                >
+                  ✦
+                </text>
+                <text
+                  x="50%"
+                  y="51%"
+                  textAnchor="middle"
+                  fill="#5a5a5f"
+                  fontSize="16"
+                  fontWeight="500"
+                >
+                  Your canvas is empty
+                </text>
+                <text
+                  x="50%"
+                  y="56%"
+                  textAnchor="middle"
+                  fill="#3e3e42"
+                  fontSize="13"
+                >
+                  Click a tool in the palette above to add your first element
+                </text>
+                <text
+                  x="50%"
+                  y="60%"
+                  textAnchor="middle"
+                  fill="#3e3e42"
+                  fontSize="12"
+                >
+                  Tip: Use Ctrl+Z to undo, Ctrl+D to duplicate, Delete to remove
+                </text>
+              </g>
             )}
 
             <g transform={`translate(${panOffset.x}, ${panOffset.y}) scale(${zoom})`}>
@@ -1089,6 +1369,7 @@ const UMLEditor = () => {
               })}
 
               {/* Show temporary connection line */}
+              {/* Fix #11: Live connection preview line follows the mouse cursor */}
               {connectionStart && (
                 (() => {
                   const startEl = elements.find(el => el.id === connectionStart);
@@ -1097,11 +1378,12 @@ const UMLEditor = () => {
                       <line
                         x1={startEl.x + startEl.width / 2}
                         y1={startEl.y + startEl.height / 2}
-                        x2={startEl.x + startEl.width / 2}
-                        y2={startEl.y + startEl.height / 2}
+                        x2={mousePos.x}
+                        y2={mousePos.y}
                         stroke="#007acc"
                         strokeWidth="2"
                         strokeDasharray="5,5"
+                        pointerEvents="none"
                       />
                     );
                   }
@@ -1114,6 +1396,7 @@ const UMLEditor = () => {
                 <g
                   key={element.id}
                   onMouseDown={(e) => handleMouseDown(e, element)}
+                  onDoubleClick={(e) => handleDoubleClick(e, element)}
                   style={{ cursor: selectedTool === 'select' ? 'move' : 'pointer' }}
                 >
                   {/* Class Diagram Element */}
@@ -1196,100 +1479,7 @@ const UMLEditor = () => {
                         </>
                       )}
                       {/* Resize Handles - only show when element is selected */}
-                      {selectedElements.some(el => el.id === element.id) && selectedElements.length === 1 && (
-                        <>
-                          {/* Corner handles */}
-                          <rect
-                            x={element.x - 4}
-                            y={element.y - 4}
-                            width="8"
-                            height="8"
-                            fill="#007acc"
-                            stroke="#ffffff"
-                            strokeWidth="1"
-                            style={{ cursor: 'nw-resize' }}
-                            onMouseDown={(e) => handleResizeStart(e, element, 'nw')}
-                          />
-                          <rect
-                            x={element.x + element.width - 4}
-                            y={element.y - 4}
-                            width="8"
-                            height="8"
-                            fill="#007acc"
-                            stroke="#ffffff"
-                            strokeWidth="1"
-                            style={{ cursor: 'ne-resize' }}
-                            onMouseDown={(e) => handleResizeStart(e, element, 'ne')}
-                          />
-                          <rect
-                            x={element.x - 4}
-                            y={element.y + element.height - 4}
-                            width="8"
-                            height="8"
-                            fill="#007acc"
-                            stroke="#ffffff"
-                            strokeWidth="1"
-                            style={{ cursor: 'sw-resize' }}
-                            onMouseDown={(e) => handleResizeStart(e, element, 'sw')}
-                          />
-                          <rect
-                            x={element.x + element.width - 4}
-                            y={element.y + element.height - 4}
-                            width="8"
-                            height="8"
-                            fill="#007acc"
-                            stroke="#ffffff"
-                            strokeWidth="1"
-                            style={{ cursor: 'se-resize' }}
-                            onMouseDown={(e) => handleResizeStart(e, element, 'se')}
-                          />
-                          {/* Edge handles */}
-                          <rect
-                            x={element.x + element.width / 2 - 4}
-                            y={element.y - 4}
-                            width="8"
-                            height="8"
-                            fill="#007acc"
-                            stroke="#ffffff"
-                            strokeWidth="1"
-                            style={{ cursor: 'n-resize' }}
-                            onMouseDown={(e) => handleResizeStart(e, element, 'n')}
-                          />
-                          <rect
-                            x={element.x + element.width / 2 - 4}
-                            y={element.y + element.height - 4}
-                            width="8"
-                            height="8"
-                            fill="#007acc"
-                            stroke="#ffffff"
-                            strokeWidth="1"
-                            style={{ cursor: 's-resize' }}
-                            onMouseDown={(e) => handleResizeStart(e, element, 's')}
-                          />
-                          <rect
-                            x={element.x - 4}
-                            y={element.y + element.height / 2 - 4}
-                            width="8"
-                            height="8"
-                            fill="#007acc"
-                            stroke="#ffffff"
-                            strokeWidth="1"
-                            style={{ cursor: 'w-resize' }}
-                            onMouseDown={(e) => handleResizeStart(e, element, 'w')}
-                          />
-                          <rect
-                            x={element.x + element.width - 4}
-                            y={element.y + element.height / 2 - 4}
-                            width="8"
-                            height="8"
-                            fill="#007acc"
-                            stroke="#ffffff"
-                            strokeWidth="1"
-                            style={{ cursor: 'e-resize' }}
-                            onMouseDown={(e) => handleResizeStart(e, element, 'e')}
-                          />
-                        </>
-                      )}
+
                     </>
                   )}
 
@@ -1648,6 +1838,64 @@ const UMLEditor = () => {
                       </text>
                     </>
                   )}
+
+                  {/* Fix #14: Resize handles for ALL element types */}
+                  {selectedElements.some(el => el.id === element.id) && selectedElements.length === 1 && (
+                    <>
+                      {[
+                        { pos: 'nw', x: element.x - 4,                      y: element.y - 4,                       cursor: 'nw-resize' },
+                        { pos: 'ne', x: element.x + element.width - 4,       y: element.y - 4,                       cursor: 'ne-resize' },
+                        { pos: 'sw', x: element.x - 4,                      y: element.y + element.height - 4,       cursor: 'sw-resize' },
+                        { pos: 'se', x: element.x + element.width - 4,       y: element.y + element.height - 4,      cursor: 'se-resize' },
+                        { pos: 'n',  x: element.x + element.width / 2 - 4,   y: element.y - 4,                       cursor: 'n-resize'  },
+                        { pos: 's',  x: element.x + element.width / 2 - 4,   y: element.y + element.height - 4,      cursor: 's-resize'  },
+                        { pos: 'w',  x: element.x - 4,                      y: element.y + element.height / 2 - 4,  cursor: 'w-resize'  },
+                        { pos: 'e',  x: element.x + element.width - 4,       y: element.y + element.height / 2 - 4, cursor: 'e-resize'  },
+                      ].map(h => (
+                        <rect
+                          key={h.pos}
+                          x={h.x} y={h.y}
+                          width="8" height="8"
+                          fill="#007acc" stroke="#ffffff" strokeWidth="1"
+                          style={{ cursor: h.cursor }}
+                          onMouseDown={(e) => handleResizeStart(e, element, h.pos)}
+                        />
+                      ))}
+                    </>
+                  )}
+                  {/* Fix #19: Inline rename overlay — shown on double-click */}
+                  {inlineEditId === element.id && (
+                    <foreignObject
+                      x={element.x + element.width / 2 - 80}
+                      y={element.y + (element.stereotype ? 28 : 18)}
+                      width="160"
+                      height="30"
+                    >
+                      <input
+                        ref={inlineInputRef}
+                        value={inlineEditValue}
+                        onChange={(e) => setInlineEditValue(e.target.value)}
+                        onBlur={commitInlineRename}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') commitInlineRename();
+                          if (e.key === 'Escape') { setInlineEditId(null); setInlineEditValue(''); }
+                        }}
+                        style={{
+                          width: '100%',
+                          height: '100%',
+                          background: '#1e1e1e',
+                          color: 'white',
+                          border: '2px solid #007acc',
+                          borderRadius: '4px',
+                          textAlign: 'center',
+                          fontSize: '13px',
+                          fontWeight: 'bold',
+                          outline: 'none',
+                          padding: '2px 6px',
+                        }}
+                      />
+                    </foreignObject>
+                  )}
                 </g>
               ))}
             </g>
@@ -1682,11 +1930,20 @@ const UMLEditor = () => {
         setConnections={setConnections}
         setSelectedConnection={setSelectedConnection}
         saveToHistory={() => saveToHistory(elements, connections)}
+        language={language}
         generatedCode={generatedCode}
         generatedFiles={generatedFiles}
         selectedFileIndex={selectedFileIndex}
         setSelectedFileIndex={setSelectedFileIndex}
       />
+
+      {/* Validation Panel — inline error display */}
+      {showValidationPanel && validationResult && (
+        <ValidationPanel
+          validationResult={validationResult}
+          onClose={() => setShowValidationPanel(false)}
+        />
+      )}
 
       {/* Code Import Modal */}
       {showCodeImportModal && (
@@ -1695,6 +1952,20 @@ const UMLEditor = () => {
           onClose={() => setShowCodeImportModal(false)}
         />
       )}
+
+      {/* Login Modal */}
+      {showLoginModal && (
+        <LoginModal
+          onClose={() => setShowLoginModal(false)}
+          onLoginSuccess={(user) => {
+            setCurrentUser(user);
+            setShowLoginModal(false);
+          }}
+        />
+      )}
+
+      {/* Fix #12: Toast notifications replace all alert() calls */}
+      <ToastContainer toasts={toasts} onRemove={removeToast} />
     </div>
   );
 };

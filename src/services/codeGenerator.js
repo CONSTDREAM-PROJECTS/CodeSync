@@ -46,112 +46,84 @@
  * ============================================================
  */
 
+import TypeMapper from './typeMapper';
+
 class CodeGenerator {
 
   // ─────────────────────────────────────────────────────────
-  // TYPE-MAPPING UTILITIES
+  // TYPE-MAPPING UTILITIES — delegated to TypeMapper (Fix #21)
   // ─────────────────────────────────────────────────────────
 
   /**
    * mapType(umlType, lang)
    * ----------------------
-   * LAYMAN'S: The diagram stores generic type names like "Integer" or "List".
-   * This translates them to the correct word for the chosen language —
-   * "Integer" becomes "int" in Java, "int" in Python, and "number" in JS.
+   * LAYMAN'S: Translates a generic UML type like "Integer" to the
+   * correct word for the chosen language ("int" in Java, "number" in JS).
    *
-   * TECHNICAL: Two-level lookup into a nested literal object. Returns the raw
-   * UML type if the language or type mapping is missing (graceful degradation).
-   *
-   * RELATIONSHIP: A slimmed-down sibling of TypeMapper.mapType() in typeMapper.js.
-   * Both do the same job; this one is inlined here so codeGenerator.js has no
-   * external service dependency during code emission.
+   * TECHNICAL: Fix #21 — previously this maintained its own duplicate
+   * lookup table that could drift out of sync with TypeMapper. Now it
+   * delegates directly to TypeMapper.mapType() as the single source of truth.
+   * Extra entries Java{Short, void, Any}, Python{void, Any}, JS{void, Any}
+   * that were only in this table are preserved by extending TypeMapper's
+   * result with a small local fallback so no generation output changes.
    *
    * @param {string} umlType - Generic UML type name (e.g., "Integer")
    * @param {string} lang    - Target language ("Java" | "Python" | "JavaScript")
    * @returns {string}       - Language-native type string
    */
   static mapType(umlType, lang) {
-    const map = {
-      Java: {
-        String:'String', Integer:'int', Double:'double', Boolean:'boolean',
-        Float:'float',   Long:'long',   Character:'char', Byte:'byte',
-        Short:'short',   List:'List<Object>', ArrayList:'ArrayList<Object>',
-        Map:'Map<String,Object>', HashMap:'HashMap<String,Object>',
-        Set:'Set<Object>', Date:'Date', LocalDateTime:'LocalDateTime',
-        Object:'Object', void:'void', Any:'Object'
-      },
-      Python: {
-        String:'str', Integer:'int', Double:'float', Boolean:'bool',
-        Float:'float', Long:'int', Character:'str', Byte:'bytes',
-        List:'List', ArrayList:'List', Map:'Dict', HashMap:'Dict',
-        Set:'Set', Date:'datetime', LocalDateTime:'datetime',
-        Object:'object', void:'None', Any:'Any'
-      },
-      JavaScript: {
-        String:'string', Integer:'number', Double:'number', Boolean:'boolean',
-        Float:'number',  Long:'number',  Character:'string', Byte:'number',
-        List:'Array',   ArrayList:'Array', Map:'Object', HashMap:'Map',
-        Set:'Set', Date:'Date', LocalDateTime:'Date',
-        Object:'any', void:'void', Any:'any'
-      }
+    // Extra entries that codeGenerator needs beyond TypeMapper's table
+    const extras = {
+      Java:       { Short: 'short', void: 'void', Any: 'Object' },
+      Python:     { void: 'None',   Any: 'Any' },
+      JavaScript: { void: 'void',   Any: 'any', Object: 'any' },
     };
-    const lm = map[lang];
-    if (!lm) return umlType || 'Object';
-    return lm[umlType] || umlType || 'Object';
+    const fromExtras = extras[lang]?.[umlType];
+    if (fromExtras !== undefined) return fromExtras;
+    return TypeMapper.mapType(umlType, lang);
   }
 
   /**
    * getDefaultValue(nativeType, lang)
    * -----------------------------------
-   * LAYMAN'S: Every field and return statement needs a "blank slate" value.
-   * This returns the correct one per language — 0 for Java ints, "" for
-   * Python strings, [] for JS Arrays, etc. — so generated code compiles
-   * without null-pointer or type errors.
+   * LAYMAN'S: Returns the correct "blank slate" value for a type in a
+   * language — 0 for Java ints, "" for Python strings, [] for JS Arrays.
    *
-   * TECHNICAL: Two-level lookup using the *already-mapped* native type name
-   * (not the UML name). Uses nullish coalescing to handle the space-padded
-   * 'string ' key that exists as a workaround for a JS Map collision.
-   *
-   * RELATIONSHIP: Called after mapType() at every field declaration and
-   * return statement inside buildJavaClass(), buildPythonClass(), and
-   * buildJavaScriptClass(). The standalone counterpart is
-   * TypeMapper.getDefaultValue() in typeMapper.js.
+   * TECHNICAL: Fix #21 — delegates to TypeMapper.getDefaultValue() as the
+   * single source of truth. Java collection literals (new ArrayList<>() etc.)
+   * and the JS space-padded 'string ' quirk are preserved via a local
+   * override map applied before falling back to TypeMapper.
    *
    * @param {string} nativeType - Language-native type string (e.g., "int")
    * @param {string} lang       - Target language
    * @returns {string}          - Initialization literal (e.g., "0", "null", "[]")
    */
   static getDefaultValue(nativeType, lang) {
-    const defs = {
+    // Overrides needed for generated code that TypeMapper doesn't cover
+    const overrides = {
       Java: {
-        'int':'0', 'double':'0.0', 'float':'0.0f', 'boolean':'false',
-        'long':'0L', 'char':"'\\0'", 'byte':'0', 'short':'0',
-        'String':'""', 'Object':'null', 'void':'', 'Date':'null',
-        'LocalDateTime':'null',
-        'List<Object>':'new ArrayList<>()',
-        'ArrayList<Object>':'new ArrayList<>()',
-        'Map<String,Object>':'new HashMap<>()',
+        'void': '',
+        'List<Object>':          'new ArrayList<>()',
+        'ArrayList<Object>':     'new ArrayList<>()',
+        'Map<String,Object>':    'new HashMap<>()',
         'HashMap<String,Object>':'new HashMap<>()',
-        'Set<Object>':'new HashSet<>()'
+        'Set<Object>':           'new HashSet<>()',
       },
-      Python: {
-        'str':'""', 'int':'0', 'float':'0.0', 'bool':'False',
-        'bytes':'b""', 'list':'[]', 'dict':'{}', 'set':'set()',
-        'None':'None', 'object':'None', 'List':'[]', 'Dict':'{}',
-        'Set':'set()', 'datetime':'None', 'Any':'None'
-      },
+      Python: { 'None': 'None', 'Any': 'None' },
       JavaScript: {
-        'number':'0', 'string':'"" ', 'boolean':'false',
-        'Array':'[]', 'Object':'{}', 'Map':'new Map()', 'Set':'new Set()',
-        'Date':'new Date()', 'any':'null', 'void':'', 'string ':'"" '
-      }
+        'void': '',
+        'string ': '"" ',  // space-padded key — JS Map collision workaround
+        'any': 'null',
+        'Map': 'new Map()',
+        'Set': 'new Set()',
+        'Date': 'new Date()',
+      },
     };
-    const ld = defs[lang];
-    if (!ld) return 'null';
-    // trim to handle the space-padded 'string ' key
-    return ld[nativeType] ?? ld[nativeType?.trim()] ?? (
-      nativeType === 'void' ? '' : 'null'
-    );
+    const override = overrides[lang]?.[nativeType];
+    if (override !== undefined) return override;
+    // Trim to handle the space-padded 'string ' key before delegating
+    const result = TypeMapper.getDefaultValue(nativeType?.trim(), lang);
+    return result !== 'null' ? result : (nativeType === 'void' ? '' : 'null');
   }
 
   // ─────────────────────────────────────────────────────────

@@ -79,20 +79,65 @@ export const useCanvasInteractions = () => {
 
   /**
    * handleZoomIn / handleZoomOut
-   * LAYMAN'S: Zoom the canvas in or out one step at a time.
-   *   Capped so you can't zoom so far in or out that the diagram
-   *   becomes unusable (max 200%, min 50%).
-   * TECHNICAL: Functional setState with Math.min/max bounds.
-   *   Step size is 0.1 (10%). No dependency array entries needed
-   *   because the updater function receives the previous value.
+   * LAYMAN'S: Zoom the canvas in or out one step at a time from the toolbar buttons.
+   *   Centers zoom on the middle of the canvas viewport.
+   * TECHNICAL: Adjusts panOffset so the canvas center stays fixed during zoom.
    */
   const handleZoomIn = useCallback(() => {
-    setZoom(prev => Math.min(prev + 0.1, 2));
-  }, []);
+    setZoom(prev => {
+      const next = Math.min(prev + 0.1, 2);
+      const rect = canvasRef.current?.getBoundingClientRect();
+      if (rect) {
+        const cx = rect.width / 2;
+        const cy = rect.height / 2;
+        setPanOffset(p => ({
+          x: cx - (cx - p.x) * (next / prev),
+          y: cy - (cy - p.y) * (next / prev),
+        }));
+      }
+      return next;
+    });
+  }, [canvasRef]);
 
   const handleZoomOut = useCallback(() => {
-    setZoom(prev => Math.max(prev - 0.1, 0.5));
-  }, []);
+    setZoom(prev => {
+      const next = Math.max(prev - 0.1, 0.5);
+      const rect = canvasRef.current?.getBoundingClientRect();
+      if (rect) {
+        const cx = rect.width / 2;
+        const cy = rect.height / 2;
+        setPanOffset(p => ({
+          x: cx - (cx - p.x) * (next / prev),
+          y: cy - (cy - p.y) * (next / prev),
+        }));
+      }
+      return next;
+    });
+  }, [canvasRef]);
+
+  /**
+   * handleWheelZoom(e)
+   * LAYMAN'S: Zoom with the scroll wheel, centered exactly on the mouse cursor —
+   *   just like Google Maps. Scrolling up zooms in, down zooms out.
+   * TECHNICAL: Computes the cursor position in diagram-space, adjusts panOffset
+   *   so that point stays fixed under the cursor as zoom changes.
+   */
+  const handleWheelZoom = useCallback((e) => {
+    e.preventDefault();
+    const rect = canvasRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    const delta = e.deltaY > 0 ? -0.1 : 0.1;
+    setZoom(prev => {
+      const next = Math.min(2, Math.max(0.5, prev + delta));
+      const mx = e.clientX - rect.left;
+      const my = e.clientY - rect.top;
+      setPanOffset(p => ({
+        x: mx - (mx - p.x) * (next / prev),
+        y: my - (my - p.y) * (next / prev),
+      }));
+      return next;
+    });
+  }, [canvasRef]);
 
   /**
    * toggleGrid
@@ -223,6 +268,7 @@ export const useCanvasInteractions = () => {
     isDragging,
     isPanning,
     panOffset,
+    setPanOffset,
     zoom,
     showGrid,
     canvasRef,
@@ -230,6 +276,7 @@ export const useCanvasInteractions = () => {
     // Actions
     handleZoomIn,
     handleZoomOut,
+    handleWheelZoom,
     toggleGrid,
     startPanning,
     updatePan,

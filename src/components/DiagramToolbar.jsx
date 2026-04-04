@@ -72,6 +72,8 @@ const DiagramToolbar = ({
   onNew,
   onImport,
   onExport,
+  onExportSVG,
+  onExportPNG,
   onGenerateCode,
   onCodeToUML,
   zoom,
@@ -95,33 +97,27 @@ const DiagramToolbar = ({
    * TECHNICAL: Boolean flags derived once per render from selectedDiagram.
    *   Used to conditionally render JSX blocks further down.
    */
-  // "Code to Diagram" import — only meaningful for class diagrams
-  const supportsCodeImport = selectedDiagram === 'class';
+  // "Code to Diagram" import — supported for all 3 diagram types
+  const supportsCodeImport = true;
 
   // Language selector — only class diagrams produce language-specific code
   const supportsLanguageSelect = selectedDiagram === 'class';
 
   /**
    * generateButtonLabel / generateButtonTitle
-   * LAYMAN'S: The right-side primary button says "Generate Code" for
-   *   class diagrams and "Generate Docs" for use-case and sequence
-   *   diagrams, since those produce Markdown documentation instead
-   *   of source code.
-   * TECHNICAL: Ternary expressions evaluated at render time.
-   *   Both are passed as children/title to the same JSX button element.
+   * LAYMAN'S: All three diagram types now say "Generate Code" since
+   *   all of them produce code output (class → source code,
+   *   use case / sequence → structured code/docs).
+   * TECHNICAL: Unified label across all diagram types.
    */
-  // Button label + tooltip per diagram type
-  const generateButtonLabel = selectedDiagram === 'class'
-    ? 'Generate Code'
-    : selectedDiagram === 'usecase'
-    ? 'Generate Docs'
-    : 'Generate Docs';
+  // Button label + tooltip — same for all diagram types
+  const generateButtonLabel = 'Generate Code';
 
   const generateButtonTitle = selectedDiagram === 'class'
     ? 'Generate source code from class diagram'
     : selectedDiagram === 'usecase'
-    ? 'Generate use case documentation'
-    : 'Generate sequence flow documentation';
+    ? 'Generate code from use case diagram'
+    : 'Generate code from sequence diagram';
 
   return (
     <div className="px-3 py-2 flex items-center justify-between flex-shrink-0" style={{ background: 'var(--panel-2)', borderBottom: '1px solid rgba(255,255,255,0.03)' }}>
@@ -142,16 +138,44 @@ const DiagramToolbar = ({
         <div className="w-px h-6 flex-shrink-0" style={{ background: 'var(--panel)' }}></div>
 
         {/* File Operations */}
-        <button onClick={onNew} className="p-2 hover:bg-[#3e3e42] rounded transition-colors flex-shrink-0" title="New">
+        <button onClick={onNew} className="p-2 hover:bg-[#3e3e42] rounded transition-colors flex-shrink-0" title="New Diagram">
           <Save size={18} />
         </button>
-        <label className="p-2 hover:bg-[#3e3e42] rounded transition-colors cursor-pointer flex-shrink-0" title="Import">
+        <label className="p-2 hover:bg-[#3e3e42] rounded transition-colors cursor-pointer flex-shrink-0" title="Import JSON">
           <Upload size={18} />
           <input type="file" accept=".json" onChange={onImport} className="hidden" />
         </label>
-        <button onClick={onExport} className="p-2 hover:bg-[#3e3e42] rounded transition-colors flex-shrink-0" title="Export">
-          <Download size={18} />
-        </button>
+        {/* Fix #6: Export format group — JSON / SVG / PNG */}
+        <div className="relative group flex-shrink-0">
+          <button
+            className="p-2 hover:bg-[#3e3e42] rounded transition-colors flex items-center gap-1"
+            title="Export diagram"
+            onClick={onExport}
+          >
+            <Download size={18} />
+          </button>
+          {/* Hover dropdown for export formats */}
+          <div className="absolute left-0 top-full mt-1 hidden group-hover:flex flex-col bg-[#2d2d30] border border-[#3e3e42] rounded shadow-xl z-50 min-w-[110px]">
+            <button
+              onClick={onExport}
+              className="px-3 py-2 text-xs text-left hover:bg-[#3e3e42] text-white whitespace-nowrap"
+            >
+              📄 Export JSON
+            </button>
+            <button
+              onClick={onExportSVG}
+              className="px-3 py-2 text-xs text-left hover:bg-[#3e3e42] text-white whitespace-nowrap"
+            >
+              🖼️ Export SVG
+            </button>
+            <button
+              onClick={onExportPNG}
+              className="px-3 py-2 text-xs text-left hover:bg-[#3e3e42] text-white whitespace-nowrap"
+            >
+              🖼️ Export PNG
+            </button>
+          </div>
+        </div>
 
         <div className="w-px h-6 bg-[#3e3e42] flex-shrink-0"></div>
 

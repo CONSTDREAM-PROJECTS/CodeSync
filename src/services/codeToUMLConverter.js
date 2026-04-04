@@ -156,8 +156,14 @@ class CodeToUMLConverter {
    * Delegates to parseJavaAST / parsePythonAST / parseJavaScriptAST / parsePlantUMLAST.
    */
   static parseSourceCode(sourceCode, language) {
-    // PlantUML auto-detect: check for its signature keywords before trusting the language param
-    if (sourceCode.includes('classDiagram') || sourceCode.includes('class ') && sourceCode.includes('{')) {
+    // Fix #16: PlantUML auto-detect — only fire on definitive PlantUML markers,
+    // NOT on bare 'class {' which matches Java/JS/Python classes.
+    const isDefinitivelyPlantUML = (
+      sourceCode.includes('@startuml') ||
+      sourceCode.includes('classDiagram') ||
+      /^\s*class\s+\w+\s*\{[^}]*<</.test(sourceCode)   // PlantUML stereotypes inside class body
+    );
+    if (isDefinitivelyPlantUML) {
       return this.parsePlantUMLAST(sourceCode);
     }
 

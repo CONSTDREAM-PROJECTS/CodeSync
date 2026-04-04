@@ -1,156 +1,182 @@
 /**
  * ============================================================
- * diagramUtils.js — Diagram Configuration & Toolbar Registry
+ * diagramUtils.js — Diagram Types & Toolbar Item Definitions
  * ============================================================
  *
  * WHAT THIS FILE DOES (Layman's):
- * Think of this as the "menu" file for the entire app. It defines:
- *   1. Which diagram types exist and how they appear in the sidebar
- *   2. Which tools/buttons appear in the tool palette for each diagram type
- *
- * Every time you switch from "Class Diagram" to "Use Case Diagram",
- * the app reads this file to know what tools to show in the palette.
+ * This is the central registry for every diagram type the editor
+ * supports and every tool available in each diagram's palette.
+ * When the user switches from "Class Diagram" to "Use Case Diagram",
+ * the sidebar and tool palette both re-read from here to show the
+ * correct controls for that diagram type.
  *
  * TECHNICAL OVERVIEW:
- * Exports two things:
- *   - diagramTypes  → Array of diagram descriptors consumed by DiagramSidebar
- *   - getToolbarItems(diagramId) → Returns the correct tool list for ToolPalette
+ * Two exports:
+ *   diagramTypes      — Array<{ id, name, category }>
+ *                       Used by DiagramSidebar to render the list and
+ *                       by UMLEditor for name lookups (e.g. auto-save label).
+ *
+ *   getToolbarItems() — (diagramId: string) => Array<{ id, icon, label, group }>
+ *                       Used by ToolPalette to render the correct tool buttons.
+ *                       group values: 'mode' | 'element' | 'relation'
  *
  * HOW IT RELATES TO THE REST OF THE CODEBASE:
- * - UMLEditor.jsx imports both and passes them as props to child components
- * - DiagramSidebar receives diagramTypes to render the left nav
- * - ToolPalette receives the result of getToolbarItems() to render the tool bar
- * - addElement() in UMLEditor uses the item.id values from toolbar items
- *   as the element type string — so these IDs must match the type checks
- *   in UMLEditor's rendering logic exactly.
+ * - Imported by UMLEditor.jsx:
+ *     import { diagramTypes, getToolbarItems } from '../utils/diagramUtils';
+ * - diagramTypes is passed as a prop to DiagramSidebar.
+ * - getToolbarItems(selectedDiagram) is passed to ToolPalette as toolbarItems.
+ * - Element type ids (e.g. 'class', 'actor', 'lifeline') must match the
+ *   element.type values used in UMLEditor's SVG rendering switch blocks.
+ * - Relationship type ids (e.g. 'inheritance', 'include') must match the
+ *   connection.type values used in UMLEditor's connection rendering.
  * ============================================================
  */
 
-
 // ─────────────────────────────────────────────────────────────
-// DIAGRAM TYPES
-// Used by: DiagramSidebar (renders the left sidebar navigation)
-// Shape: { id, name, category }
-//   id       → matches selectedDiagram state in UMLEditor
-//   name     → display label in the sidebar
-//   category → 'Structural' | 'Behavioral' (used for section grouping)
+// Diagram Type Registry
 // ─────────────────────────────────────────────────────────────
 
+/**
+ * diagramTypes
+ * LAYMAN'S: The full list of diagram types shown in the left sidebar.
+ *   Structural diagrams describe static structure (classes, components).
+ *   Behavioral diagrams describe dynamic behavior (use cases, sequences).
+ * TECHNICAL: Each entry has:
+ *   id       — matches selectedDiagram state in UMLEditor
+ *   name     — display label in DiagramSidebar
+ *   category — 'Structural' or 'Behavioral' for sidebar grouping
+ */
 export const diagramTypes = [
-  // ── Structural ─────────────────────────────────────────────
-  {
-    id:       'class',
-    name:     'Class Diagram',
-    category: 'Structural'
-  },
+  // ── Structural ──────────────────────────────────────────────
+  { id: 'class',     name: 'Class Diagram',     category: 'Structural' },
 
-  // ── Behavioral ─────────────────────────────────────────────
-  {
-    id:       'usecase',
-    name:     'Use Case Diagram',
-    category: 'Behavioral'
-  },
-  {
-    id:       'sequence',
-    name:     'Sequence Diagram',
-    category: 'Behavioral'
-  }
+  // ── Behavioral ──────────────────────────────────────────────
+  { id: 'usecase',   name: 'Use Case Diagram',   category: 'Behavioral' },
+  { id: 'sequence',  name: 'Sequence Diagram',   category: 'Behavioral' },
 ];
-
 
 // ─────────────────────────────────────────────────────────────
-// TOOLBAR ITEMS PER DIAGRAM TYPE
-// Used by: ToolPalette (renders the horizontal tool palette)
-// Shape per item: { id, label, icon }
-//   id    → passed to addElement(type) or onToolSelect(type) in UMLEditor
-//           MUST match the type strings used in UMLEditor's rendering switch
-//   label → display text on the button
-//   icon  → emoji/symbol shown on the button
-//
-// Two special IDs that trigger onToolSelect instead of onElementAdd:
-//   'select' → activates selection mode
-//   'delete' → activates deletion mode (click element to delete)
-//
-// All other IDs are split into two groups inside UMLEditor.addElement():
-//   - Element types  → create a new canvas node
-//   - Relationship types → set selectedTool so the next two clicks draw a connection
+// Toolbar Item Definitions per Diagram Type
 // ─────────────────────────────────────────────────────────────
 
-const CLASS_DIAGRAM_TOOLS = [
-  // ── Mode controls ──────────────────────────────────────────
-  { id: 'select',        label: 'Select',         icon: '↖️',  group: 'mode'     },
-  { id: 'delete',        label: 'Delete',          icon: '🗑️', group: 'mode'     },
-
-  // ── Element types ──────────────────────────────────────────
-  { id: 'class',         label: 'Class',           icon: '📦',  group: 'element'  },
-  { id: 'interface',     label: 'Interface',       icon: '🔷',  group: 'element'  },
-  { id: 'abstract',      label: 'Abstract Class',  icon: '📐',  group: 'element'  },
-  { id: 'object',        label: 'Object',          icon: '🟦',  group: 'element'  },
-  { id: 'package',       label: 'Package',         icon: '📁',  group: 'element'  },
-  { id: 'component',     label: 'Component',       icon: '⚙️',  group: 'element'  },
-
-  // ── Relationship types ─────────────────────────────────────
-  { id: 'association',   label: 'Association',     icon: '—',   group: 'relation' },
-  { id: 'inheritance',   label: 'Inheritance',     icon: '△',   group: 'relation' },
-  { id: 'aggregation',   label: 'Aggregation',     icon: '◇',   group: 'relation' },
-  { id: 'composition',   label: 'Composition',     icon: '◆',   group: 'relation' },
-  { id: 'dependency',    label: 'Dependency',      icon: '⤳',   group: 'relation' },
-  { id: 'realization',   label: 'Realization',     icon: '⇢',   group: 'relation' }
+/**
+ * _modeTools
+ * LAYMAN'S: The Select and Delete tools that appear on every diagram's palette.
+ * TECHNICAL: Always prepended to every toolbar. group: 'mode' so ToolPalette
+ *   renders them before the divider separating modes from elements.
+ */
+const _modeTools = [
+  { id: 'select', icon: '↖', label: 'Select',  group: 'mode' },
+  { id: 'delete', icon: '✕', label: 'Delete',  group: 'mode' },
 ];
 
-const USE_CASE_DIAGRAM_TOOLS = [
-  // ── Mode controls ──────────────────────────────────────────
-  { id: 'select',        label: 'Select',          icon: '↖️',  group: 'mode'     },
-  { id: 'delete',        label: 'Delete',           icon: '🗑️', group: 'mode'     },
+/**
+ * _toolbarItems
+ * LAYMAN'S: A lookup table — "for diagram X, what tools should the palette show?"
+ * TECHNICAL: Keys match diagramType ids. Values are arrays of tool descriptors.
+ *   Each tool has:
+ *     id     — passed to UMLEditor's addElement() when clicked;
+ *              for elements this becomes element.type,
+ *              for relations this becomes connection.type.
+ *     icon   — emoji/symbol shown on the button
+ *     label  — tooltip and button text
+ *     group  — 'element' | 'relation' for two-row ToolPalette layout
+ */
+const _toolbarItems = {
 
-  // ── Element types ──────────────────────────────────────────
-  { id: 'actor',         label: 'Actor',            icon: '🧍',  group: 'element'  },
-  { id: 'usecase',       label: 'Use Case',         icon: '⭕',  group: 'element'  },
+  // ── Class Diagram ─────────────────────────────────────────
+  class: [
+    // Elements
+    { id: 'class',       icon: '▣', label: 'Class',           group: 'element' },
+    { id: 'interface',   icon: '◈', label: 'Interface',        group: 'element' },
+    { id: 'abstract',    icon: '◇', label: 'Abstract Class',   group: 'element' },
+    { id: 'enum',        icon: '≡',  label: 'Enum',             group: 'element' },
+    // Relationships
+    { id: 'association',  icon: '→',  label: 'Association',     group: 'relation' },
+    { id: 'inheritance',  icon: '▷',  label: 'Inheritance',     group: 'relation' },
+    { id: 'aggregation',  icon: '◇→', label: 'Aggregation',     group: 'relation' },
+    { id: 'composition',  icon: '◆→', label: 'Composition',     group: 'relation' },
+    { id: 'dependency',   icon: '⇢',  label: 'Dependency',      group: 'relation' },
+    { id: 'realization',  icon: '⇾',  label: 'Realization',     group: 'relation' },
+  ],
 
-  // ── Relationship types ─────────────────────────────────────
-  { id: 'association',   label: 'Association',      icon: '—',   group: 'relation' },
-  { id: 'include',       label: '«include»',        icon: '⤵',   group: 'relation' },
-  { id: 'extend',        label: '«extend»',         icon: '⤴',   group: 'relation' },
-  { id: 'generalization',label: 'Generalization',   icon: '△',   group: 'relation' }
-];
+  // ── Object Diagram ────────────────────────────────────────
+  object: [
+    // Elements
+    { id: 'object',      icon: '▣', label: 'Object',           group: 'element' },
+    // Relationships
+    { id: 'link',        icon: '—',  label: 'Link',             group: 'relation' },
+    { id: 'dependency',  icon: '⇢',  label: 'Dependency',       group: 'relation' },
+  ],
 
-const SEQUENCE_DIAGRAM_TOOLS = [
-  // ── Mode controls ──────────────────────────────────────────
-  { id: 'select',        label: 'Select',           icon: '↖️',  group: 'mode'     },
-  { id: 'delete',        label: 'Delete',            icon: '🗑️', group: 'mode'     },
+  // ── Component Diagram ─────────────────────────────────────
+  component: [
+    // Elements
+    { id: 'component',   icon: '⬡', label: 'Component',        group: 'element' },
+    { id: 'interface',   icon: '◈', label: 'Interface',         group: 'element' },
+    { id: 'package',     icon: '📦', label: 'Package',          group: 'element' },
+    // Relationships
+    { id: 'dependency',  icon: '⇢',  label: 'Dependency',       group: 'relation' },
+    { id: 'realization', icon: '⇾',  label: 'Realization',      group: 'relation' },
+    { id: 'association', icon: '→',  label: 'Association',      group: 'relation' },
+  ],
 
-  // ── Element types ──────────────────────────────────────────
-  { id: 'lifeline',      label: 'Lifeline',          icon: '|',   group: 'element'  },
-  { id: 'actor',         label: 'Actor',             icon: '🧍',  group: 'element'  },
+  // ── Package Diagram ───────────────────────────────────────
+  package: [
+    // Elements
+    { id: 'package',     icon: '📦', label: 'Package',          group: 'element' },
+    { id: 'class',       icon: '▣', label: 'Class',             group: 'element' },
+    // Relationships
+    { id: 'dependency',  icon: '⇢',  label: 'Dependency',       group: 'relation' },
+    { id: 'import',      icon: '⇠',  label: 'Import',           group: 'relation' },
+    { id: 'association', icon: '→',  label: 'Association',      group: 'relation' },
+  ],
 
-  // ── Relationship types ─────────────────────────────────────
-  { id: 'message',       label: 'Message',           icon: '→',   group: 'relation' },
-  { id: 'return',        label: 'Return',            icon: '←',   group: 'relation' },
-  { id: 'flow',          label: 'Self Message',      icon: '↩',   group: 'relation' }
-];
+  // ── Use Case Diagram ──────────────────────────────────────
+  usecase: [
+    // Elements
+    { id: 'actor',       icon: '👤', label: 'Actor',            group: 'element' },
+    { id: 'usecase',     icon: '⬭',  label: 'Use Case',         group: 'element' },
+    { id: 'package',     icon: '▭',  label: 'System Boundary',  group: 'element' },
+    // Relationships
+    { id: 'association',    icon: '—',  label: 'Association',    group: 'relation' },
+    { id: 'include',        icon: '‹‹', label: 'Include',        group: 'relation' },
+    { id: 'extend',         icon: '‹‹', label: 'Extend',         group: 'relation' },
+    { id: 'generalization', icon: '▷',  label: 'Generalization', group: 'relation' },
+  ],
 
+  // ── Sequence Diagram ──────────────────────────────────────
+  sequence: [
+    // Elements
+    { id: 'lifeline',    icon: '|',  label: 'Lifeline',          group: 'element' },
+    { id: 'actor',       icon: '👤', label: 'Actor',             group: 'element' },
+    { id: 'message',     icon: '▭',  label: 'Message Box',       group: 'element' },
+    // Relationships (messages between lifelines)
+    { id: 'message',     icon: '→',  label: 'Sync Message',      group: 'relation' },
+    { id: 'return',      icon: '←',  label: 'Return',            group: 'relation' },
+    { id: 'connector',   icon: '⇢',  label: 'Async Message',     group: 'relation' },
+  ],
+};
+
+// ─────────────────────────────────────────────────────────────
+// Public API
+// ─────────────────────────────────────────────────────────────
 
 /**
  * getToolbarItems(diagramId)
- * ─────────────────────────────────────────────────────────────
- * LAYMAN'S: "Given which diagram type is currently selected,
- * what tools should appear in the top palette?"
+ * ---------------------------
+ * LAYMAN'S: Given a diagram type id (like "class" or "usecase"), returns
+ *   the list of tool buttons that should appear in the tool palette.
+ *   The mode tools (Select, Delete) are always included at the front.
  *
- * TECHNICAL: Simple switch returning the correct tool array.
- * Falls back to class diagram tools for any unrecognized ID
- * so the palette is never empty.
+ * TECHNICAL: Looks up diagram-specific tools from _toolbarItems, prepends
+ *   _modeTools, and returns the merged array. Falls back to class diagram
+ *   tools if the diagram id is unrecognised.
  *
- * RELATIONSHIP: Called in UMLEditor.jsx:
- *   <ToolPalette toolbarItems={getToolbarItems(selectedDiagram)} ... />
- *
- * @param {string} diagramId - matches diagramTypes[].id
- * @returns {Array<{ id: string, label: string, icon: string }>}
+ * @param {string} diagramId - The active diagram type id
+ * @returns {Array<{ id, icon, label, group }>}
  */
 export const getToolbarItems = (diagramId) => {
-  switch (diagramId) {
-    case 'class':    return CLASS_DIAGRAM_TOOLS;
-    case 'usecase':  return USE_CASE_DIAGRAM_TOOLS;
-    case 'sequence': return SEQUENCE_DIAGRAM_TOOLS;
-    default:         return CLASS_DIAGRAM_TOOLS;
-  }
+  const specific = _toolbarItems[diagramId] || _toolbarItems['class'];
+  return [..._modeTools, ...specific];
 };
