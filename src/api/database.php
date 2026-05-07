@@ -1,19 +1,26 @@
 <?php
 // ============================================================
-// database.php — PDO MySQL Connection
+// database.php — PDO MySQL Connection (Hostinger)
 // ============================================================
-// HOW TO CONFIGURE:
-//   1. Replace DB_HOST with your InfinityFree MySQL hostname
-//      (found in InfinityFree control panel → MySQL Databases)
-//   2. Replace DB_NAME, DB_USER, DB_PASS with your credentials
+// HOW TO CONFIGURE FOR HOSTINGER:
+//   1. hPanel → Hosting → MySQL Databases → create a database
+//   2. Note the hostname (usually 'localhost' on Hostinger),
+//      database name, username, and password
+//   3. Fill in the four DB_* constants below
 // ============================================================
 
-define('DB_HOST', 'sql100.infinityfree.com');   // ← change to your host
-define('DB_NAME', 'if0_41743134_codesynch');    // ← change to your DB name
-define('DB_USER', 'if0_41743134');              // ← change to your DB user
-define('DB_PASS', 'Seph7837');          // ← change to your password
+// BUG 7 FIX: Was still pointing to InfinityFree credentials.
+// Updated for Hostinger. DB_HOST is almost always 'localhost' on
+// Hostinger shared hosting (same-server connection).
+define('DB_HOST', 'localhost');                  // Hostinger: usually localhost
+define('DB_NAME', 'u123456789_codesynch');      // ← your Hostinger DB name
+define('DB_USER', 'u123456789_codesynch');      // ← your Hostinger DB user
+define('DB_PASS', 'YourStrongPasswordHere');    // ← your Hostinger DB password
 
-define('JWT_SECRET', 'Thisisalongfortycharacterstextthatineedtoinput');
+// JWT signing secret — must be long and random.
+// IMPORTANT: Changing this after users have registered will
+// invalidate all existing tokens and log everyone out.
+define('JWT_SECRET', 'c0d3Synch!X#9pQr$2mZvLwN^8kYtBuA@5jFeGhDsI*7oPlK+4nRqMW&6eCbVfJy');
 
 function getPDO(): PDO {
     static $pdo = null;
@@ -34,7 +41,10 @@ function getPDO(): PDO {
     } catch (PDOException $e) {
         http_response_code(500);
         header('Content-Type: application/json');
-        echo json_encode(['error' => 'Database connection failed. Check credentials.']);
+        // BUG 7 FIX: Never expose the raw exception message — it can
+        // contain DB credentials. Log server-side only.
+        error_log('[CodeSynch] DB connection failed: ' . $e->getMessage());
+        echo json_encode(['error' => 'Database connection failed. Contact the administrator.']);
         exit;
     }
 

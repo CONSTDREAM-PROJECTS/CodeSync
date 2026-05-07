@@ -159,6 +159,7 @@ const PropertiesPanel = ({
   setConnections,
   setSelectedConnection,
   saveToHistory,
+  onCopySuccess,
   generatedCode,
   generatedFiles = [],
   selectedFileIndex = 0,
@@ -297,7 +298,9 @@ const PropertiesPanel = ({
                 element={selectedElements[0]}
                 onUpdate={updateElement}
                 onDelete={deleteElement}
-                saveToHistory={() => saveToHistory(elements, connections)}
+                saveToHistory={saveToHistory}
+                elements={elements}
+                connections={connections}
               />
             ) : selectedElements.length > 1 ? (
               <div className="text-sm text-gray-500">
@@ -315,7 +318,9 @@ const PropertiesPanel = ({
                 connection={selectedConnection}
                 onUpdate={updateConnection}
                 onDelete={deleteConnection}
-                saveToHistory={() => saveToHistory(elements, connections)}
+                saveToHistory={saveToHistory}
+                elements={elements}
+                connections={connections}
               />
             ) : (
               <p className="text-sm text-gray-500">Select an element or connection to edit properties</p>
@@ -329,8 +334,11 @@ const PropertiesPanel = ({
               {currentCode && (
                 <button
                   onClick={() => {
-                    navigator.clipboard.writeText(currentCode);
-                    alert('Code copied to clipboard!');
+                    navigator.clipboard.writeText(currentCode).then(() => {
+                      onCopySuccess?.('Code copied to clipboard!');
+                    }).catch(() => {
+                      onCopySuccess?.('Failed to copy — please copy manually.', 'error');
+                    });
                   }}
                   className="text-xs text-[#007acc] hover:text-[#005a9e] transition-colors"
                 >
@@ -398,7 +406,7 @@ const PropertiesPanel = ({
  * @param {Function} onDelete        - Deletes the element from the diagram
  * @param {Function} saveToHistory   - Commits current state to undo history
  */
-const ElementProperties = ({ element, onUpdate, onDelete, saveToHistory }) => {
+const ElementProperties = ({ element, onUpdate, onDelete, saveToHistory, elements, connections }) => {
   // Minimal set of common types
   const commonTypes = ['String', 'int', 'double', 'boolean', 'void', 'Object', 'List'];
 
@@ -413,13 +421,13 @@ const ElementProperties = ({ element, onUpdate, onDelete, saveToHistory }) => {
   const addAttribute = () => {
     const newAttrs = [...(element.attributes || []), { name: 'newAttribute', type: 'String', visibility: 'private' }];
     onUpdate(element.id, { attributes: newAttrs });
-    saveToHistory();
+    saveToHistory(elements, connections);
   };
 
   const removeAttribute = (index) => {
     const newAttrs = (element.attributes || []).filter((_, i) => i !== index);
     onUpdate(element.id, { attributes: newAttrs });
-    saveToHistory();
+    saveToHistory(elements, connections);
   };
 
   const updateMethod = (index, updates) => {
@@ -431,13 +439,13 @@ const ElementProperties = ({ element, onUpdate, onDelete, saveToHistory }) => {
   const addMethod = () => {
     const newMethods = [...(element.methods || []), { name: 'newMethod', returnType: 'void', parameters: '', visibility: 'public' }];
     onUpdate(element.id, { methods: newMethods });
-    saveToHistory();
+    saveToHistory(elements, connections);
   };
 
   const removeMethod = (index) => {
     const newMethods = (element.methods || []).filter((_, i) => i !== index);
     onUpdate(element.id, { methods: newMethods });
-    saveToHistory();
+    saveToHistory(elements, connections);
   };
 
   return (
@@ -448,7 +456,7 @@ const ElementProperties = ({ element, onUpdate, onDelete, saveToHistory }) => {
           type="text"
           value={element.name}
           onChange={(e) => onUpdate(element.id, { name: e.target.value })}
-          onBlur={saveToHistory}
+          onBlur={() => saveToHistory(elements, connections)}
           className="w-full bg-[#3c3c3c] text-white px-3 py-1.5 rounded border border-[#3e3e42] text-sm focus:outline-none focus:border-[#007acc]"
         />
       </div>
@@ -460,7 +468,7 @@ const ElementProperties = ({ element, onUpdate, onDelete, saveToHistory }) => {
             value={element.stereotype || ''}
             onChange={(e) => {
               onUpdate(element.id, { stereotype: e.target.value });
-              saveToHistory();
+              saveToHistory(elements, connections);
             }}
             className="w-full bg-[#3c3c3c] text-white px-3 py-1.5 rounded border border-[#3e3e42] text-sm focus:outline-none focus:border-[#007acc]"
           >
@@ -485,7 +493,7 @@ const ElementProperties = ({ element, onUpdate, onDelete, saveToHistory }) => {
               type="text"
               value={element.className || ''}
               onChange={(e) => onUpdate(element.id, { className: e.target.value })}
-              onBlur={saveToHistory}
+              onBlur={() => saveToHistory(elements, connections)}
               placeholder="Class this object is an instance of"
               className="w-full bg-[#3c3c3c] text-white px-3 py-1.5 rounded border border-[#3e3e42] text-sm focus:outline-none focus:border-[#007acc]"
             />
@@ -497,7 +505,7 @@ const ElementProperties = ({ element, onUpdate, onDelete, saveToHistory }) => {
               type="text"
               value={element.state || ''}
               onChange={(e) => onUpdate(element.id, { state: e.target.value })}
-              onBlur={saveToHistory}
+              onBlur={() => saveToHistory(elements, connections)}
               placeholder="e.g., active, pending, completed"
               className="w-full bg-[#3c3c3c] text-white px-3 py-1.5 rounded border border-[#3e3e42] text-sm focus:outline-none focus:border-[#007acc]"
             />
@@ -517,9 +525,9 @@ const ElementProperties = ({ element, onUpdate, onDelete, saveToHistory }) => {
                         delete newValues[key];
                         newValues[e.target.value] = value;
                         onUpdate(element.id, { attributeValues: newValues });
-                        saveToHistory();
+                        saveToHistory(elements, connections);
                       }}
-                      onBlur={saveToHistory}
+                      onBlur={() => saveToHistory(elements, connections)}
                       placeholder="attribute"
                       className="flex-1 bg-[#3c3c3c] text-white px-2 py-1 rounded border border-[#3e3e42] text-xs focus:outline-none focus:border-[#007acc]"
                     />
@@ -532,7 +540,7 @@ const ElementProperties = ({ element, onUpdate, onDelete, saveToHistory }) => {
                         newValues[key] = e.target.value;
                         onUpdate(element.id, { attributeValues: newValues });
                       }}
-                      onBlur={saveToHistory}
+                      onBlur={() => saveToHistory(elements, connections)}
                       placeholder="value"
                       className="flex-1 bg-[#3c3c3c] text-white px-2 py-1 rounded border border-[#3e3e42] text-xs focus:outline-none focus:border-[#007acc]"
                     />
@@ -541,7 +549,7 @@ const ElementProperties = ({ element, onUpdate, onDelete, saveToHistory }) => {
                         const newValues = { ...element.attributeValues };
                         delete newValues[key];
                         onUpdate(element.id, { attributeValues: newValues });
-                        saveToHistory();
+                        saveToHistory(elements, connections);
                       }}
                       className="px-2 py-1 bg-red-600 hover:bg-red-700 rounded text-xs"
                     >
@@ -559,7 +567,7 @@ const ElementProperties = ({ element, onUpdate, onDelete, saveToHistory }) => {
                 const keyCount = Object.keys(newValues).length + 1;
                 newValues[`attribute${keyCount}`] = '';
                 onUpdate(element.id, { attributeValues: newValues });
-                saveToHistory();
+                saveToHistory(elements, connections);
               }}
               className="w-full bg-[#007acc] hover:bg-[#005a9e] px-3 py-1.5 rounded text-sm transition-colors mt-2"
             >
@@ -578,7 +586,7 @@ const ElementProperties = ({ element, onUpdate, onDelete, saveToHistory }) => {
                 type="number"
                 value={element.width}
                 onChange={(e) => onUpdate(element.id, { width: Math.max(50, parseInt(e.target.value) || 100) })}
-                onBlur={saveToHistory}
+                onBlur={() => saveToHistory(elements, connections)}
                 className="w-full bg-[#3c3c3c] text-white px-3 py-1.5 rounded border border-[#3e3e42] text-sm focus:outline-none focus:border-[#007acc]"
               />
             </div>
@@ -588,7 +596,7 @@ const ElementProperties = ({ element, onUpdate, onDelete, saveToHistory }) => {
                 type="number"
                 value={element.height}
                 onChange={(e) => onUpdate(element.id, { height: Math.max(50, parseInt(e.target.value) || 100) })}
-                onBlur={saveToHistory}
+                onBlur={() => saveToHistory(elements, connections)}
                 className="w-full bg-[#3c3c3c] text-white px-3 py-1.5 rounded border border-[#3e3e42] text-sm focus:outline-none focus:border-[#007acc]"
               />
             </div>
@@ -624,7 +632,7 @@ const ElementProperties = ({ element, onUpdate, onDelete, saveToHistory }) => {
                           updateAttribute(index, { type: '' });
                         } else {
                           updateAttribute(index, { type: e.target.value });
-                          saveToHistory();
+                          saveToHistory(elements, connections);
                         }
                       }}
                       className="w-24 bg-[#3c3c3c] text-white px-2 py-1 rounded border border-[#3e3e42] text-xs focus:outline-none focus:border-[#007acc]"
@@ -639,7 +647,7 @@ const ElementProperties = ({ element, onUpdate, onDelete, saveToHistory }) => {
                         type="text"
                         value={attr.type || ''}
                         onChange={(e) => updateAttribute(index, { type: e.target.value })}
-                        onBlur={saveToHistory}
+                        onBlur={() => saveToHistory(elements, connections)}
                         placeholder="custom type"
                         className="w-20 bg-[#3c3c3c] text-white px-2 py-1 rounded border border-[#007acc] text-xs focus:outline-none"
                       />
@@ -701,7 +709,7 @@ const ElementProperties = ({ element, onUpdate, onDelete, saveToHistory }) => {
                           updateMethod(index, { returnType: '' });
                         } else {
                           updateMethod(index, { returnType: e.target.value });
-                          saveToHistory();
+                          saveToHistory(elements, connections);
                         }
                       }}
                       className="w-20 bg-[#3c3c3c] text-white px-2 py-1 rounded border border-[#3e3e42] text-xs focus:outline-none focus:border-[#007acc]"
@@ -716,7 +724,7 @@ const ElementProperties = ({ element, onUpdate, onDelete, saveToHistory }) => {
                         type="text"
                         value={method.returnType || ''}
                         onChange={(e) => updateMethod(index, { returnType: e.target.value })}
-                        onBlur={saveToHistory}
+                        onBlur={() => saveToHistory(elements, connections)}
                         placeholder="custom"
                         className="w-16 bg-[#3c3c3c] text-white px-2 py-1 rounded border border-[#007acc] text-xs focus:outline-none"
                       />
@@ -800,7 +808,7 @@ const ElementProperties = ({ element, onUpdate, onDelete, saveToHistory }) => {
  * @param {Function} onDelete       - Removes the connection from the diagram
  * @param {Function} saveToHistory  - Commits current state to undo history
  */
-const ConnectionProperties = ({ connection, onUpdate, onDelete, saveToHistory }) => {
+const ConnectionProperties = ({ connection, onUpdate, onDelete, saveToHistory, elements, connections }) => {
   return (
     <div className="space-y-3">
       <div>
@@ -820,7 +828,7 @@ const ConnectionProperties = ({ connection, onUpdate, onDelete, saveToHistory })
             type="text"
             value={connection.fromMultiplicity || ''}
             onChange={(e) => onUpdate(connection.id, { fromMultiplicity: e.target.value })}
-            onBlur={saveToHistory}
+            onBlur={() => saveToHistory(elements, connections)}
             placeholder="1, *, 0..1, 1..*"
             className="w-full bg-[#3c3c3c] text-white px-3 py-1.5 rounded border border-[#3e3e42] text-sm focus:outline-none focus:border-[#007acc]"
           />
@@ -831,7 +839,7 @@ const ConnectionProperties = ({ connection, onUpdate, onDelete, saveToHistory })
             type="text"
             value={connection.toMultiplicity || ''}
             onChange={(e) => onUpdate(connection.id, { toMultiplicity: e.target.value })}
-            onBlur={saveToHistory}
+            onBlur={() => saveToHistory(elements, connections)}
             placeholder="1, *, 0..1, 1..*"
             className="w-full bg-[#3c3c3c] text-white px-3 py-1.5 rounded border border-[#3e3e42] text-sm focus:outline-none focus:border-[#007acc]"
           />
@@ -844,7 +852,7 @@ const ConnectionProperties = ({ connection, onUpdate, onDelete, saveToHistory })
           type="text"
           value={connection.label || ''}
           onChange={(e) => onUpdate(connection.id, { label: e.target.value })}
-          onBlur={saveToHistory}
+          onBlur={() => saveToHistory(elements, connections)}
           placeholder="e.g., owns, uses, manages"
           className="w-full bg-[#3c3c3c] text-white px-3 py-1.5 rounded border border-[#3e3e42] text-sm focus:outline-none focus:border-[#007acc]"
         />
@@ -857,7 +865,7 @@ const ConnectionProperties = ({ connection, onUpdate, onDelete, saveToHistory })
             type="text"
             value={connection.fromRole || ''}
             onChange={(e) => onUpdate(connection.id, { fromRole: e.target.value })}
-            onBlur={saveToHistory}
+            onBlur={() => saveToHistory(elements, connections)}
             placeholder="role name"
             className="w-full bg-[#3c3c3c] text-white px-3 py-1.5 rounded border border-[#3e3e42] text-sm focus:outline-none focus:border-[#007acc]"
           />
@@ -868,7 +876,7 @@ const ConnectionProperties = ({ connection, onUpdate, onDelete, saveToHistory })
             type="text"
             value={connection.toRole || ''}
             onChange={(e) => onUpdate(connection.id, { toRole: e.target.value })}
-            onBlur={saveToHistory}
+            onBlur={() => saveToHistory(elements, connections)}
             placeholder="role name"
             className="w-full bg-[#3c3c3c] text-white px-3 py-1.5 rounded border border-[#3e3e42] text-sm focus:outline-none focus:border-[#007acc]"
           />

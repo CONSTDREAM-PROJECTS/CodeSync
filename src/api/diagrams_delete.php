@@ -21,7 +21,12 @@ if ($_SERVER['REQUEST_METHOD'] !== 'DELETE') {
 
 $authUser = requireAuth();
 
-$body      = json_decode(file_get_contents('php://input'), true);
+$body = json_decode(file_get_contents('php://input'), true);
+if (!is_array($body)) {
+    http_response_code(400);
+    echo json_encode(['error' => 'Invalid JSON body.']);
+    exit;
+}
 $diagramId = trim($body['diagramId'] ?? '');
 
 if ($diagramId === '') {

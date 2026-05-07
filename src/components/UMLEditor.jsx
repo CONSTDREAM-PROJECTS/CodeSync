@@ -70,7 +70,7 @@ import ToolPalette from './ToolPalette';
 import PropertiesPanel from './PropertiesPanel';
 import CodeImportModal from './CodeImportModal';
 import ValidationPanel from './ValidationPanel';
-import LoginModal from './LoginModal';
+import LoginModal, { restoreSession, TOKEN_KEY } from './LoginModal';
 import { ToastContainer, useToast } from './Toast';
 
 /**
@@ -88,6 +88,11 @@ import { ToastContainer, useToast } from './Toast';
  *   (edge-point geometry, arrowhead markers) is tightly coupled to
  *   the element positions held in local state.
  */
+
+// BUG M4 FIX: Monotonically-incrementing ID counter so rapid element creation
+// never produces duplicate IDs (Date.now() collides within the same millisecond).
+let _nextId = Date.now();
+const nextId = () => ++_nextId;
 
 const UMLEditor = () => {
   // ── Diagram & language state ──────────────────────────────
@@ -153,10 +158,28 @@ const UMLEditor = () => {
   const { toasts, showToast, removeToast } = useToast();
 
   // ── Auth + persistence state ───────────────────────────────
-  // currentUser: Firebase User object when logged in, null otherwise.
-  // diagramId: stable id for this diagram session used as the Firestore key.
+  // currentUser: user object { uid, email } when logged in, null otherwise.
+  // diagramId: stable id for this diagram session used as the DB key.
   const [currentUser, setCurrentUser] = useState(null);
   const [diagramId] = useState(() => `diagram_${Date.now()}`);
+
+  // ── BUG C2 + H2 FIX: Session restore on mount ─────────────
+  // Restores the logged-in user from localStorage JWT on page load so
+  // the user does not have to log in again after every page refresh.
+  // Also listens for the 'codesynch:session-expired' event dispatched by
+  // diagramService.js when a 401 is returned (token expired mid-session).
+  useEffect(() => {
+    const user = restoreSession();
+    if (user) setCurrentUser(user);
+
+    const onExpired = () => {
+      setCurrentUser(null);
+      setShowLoginModal(true);
+      showToast('Your session expired. Please log in again.', 'error');
+    };
+    window.addEventListener('codesynch:session-expired', onExpired);
+    return () => window.removeEventListener('codesynch:session-expired', onExpired);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Validation state ───────────────────────────────────────
   // validationResult: the result object from ValidationService.validate().
@@ -220,8 +243,11 @@ const UMLEditor = () => {
    *   changes are collapsed into one save. Depends on elements, connections,
    *   selectedDiagram, language, and currentUser.
    */
+  // BUG M6 FIX: Only depend on elements/connections so a diagram-type or
+  // language switch doesn't trigger a spurious save of an unchanged canvas.
   useEffect(() => {
     if (!currentUser) return;
+    if (elements.length === 0 && connections.length === 0) return;
     DiagramService.autoSave(currentUser, diagramId, {
       name:        `${diagramTypes.find(d => d.id === selectedDiagram)?.name || 'Diagram'}`,
       diagramType: selectedDiagram,
@@ -229,7 +255,7 @@ const UMLEditor = () => {
       elements,
       connections
     });
-  }, [elements, connections, selectedDiagram, language, currentUser]);
+  }, [elements, connections]); // eslint-disable-line react-hooks/exhaustive-deps
 
   /**
    * copyElement()
@@ -265,7 +291,7 @@ const UMLEditor = () => {
         // Multiple elements
         newElements = clipboard.map((item, index) => ({
           ...JSON.parse(JSON.stringify(item)),
-          id: Date.now() + index,
+          id: nextId(),
           x: item.x + offsetX,
           y: item.y + offsetY
         }));
@@ -273,7 +299,7 @@ const UMLEditor = () => {
         // Single element
         newElements = [{
           ...JSON.parse(JSON.stringify(clipboard)),
-          id: Date.now(),
+          id: nextId(),
           x: clipboard.x + offsetX,
           y: clipboard.y + offsetY
         }];
@@ -322,6 +348,16 @@ const UMLEditor = () => {
   // Keyboard shortcuts
   useEffect(() => {
     const handleKeyDown = (e) => {
+      // BUG C3 FIX: Do not intercept shortcuts while the user is typing
+      // in any input, textarea, or the inline canvas rename field.
+      const tag = document.activeElement?.tagName;
+      const isTyping =
+        tag === 'INPUT' ||
+        tag === 'TEXTAREA' ||
+        tag === 'SELECT' ||
+        document.activeElement?.isContentEditable ||
+        inlineEditId !== null;
+      if (isTyping) return;
       if (e.ctrlKey || e.metaKey) {
         if (e.key === 'z' && !e.shiftKey) {
           e.preventDefault();
@@ -345,7 +381,7 @@ const UMLEditor = () => {
           if (selectedElements.length > 0) {
             const duplicated = selectedElements.map((el, index) => ({
               ...JSON.parse(JSON.stringify(el)),
-              id: Date.now() + index,
+              id: nextId(),
               x: el.x + 20,
               y: el.y + 20,
             }));
@@ -375,7 +411,7 @@ const UMLEditor = () => {
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [selectedElements, selectedConnection, elements, connections, clipboard]);
+  }, [selectedElements, selectedConnection, elements, connections, clipboard, inlineEditId]);
 
   /**
    * calculateElementHeight(element)
@@ -416,14 +452,17 @@ const UMLEditor = () => {
   useEffect(() => {
     let hasChanges = false;
     const updatedElements = elements.map(el => {
-      if (el.type === 'class' || el.type === 'interface' || el.type === 'abstract') {
+      // BUG H4 + BUG L4 FIX: include 'enum' in the type guard
+      if (['class', 'interface', 'abstract', 'enum'].includes(el.type)) {
         const newHeight = calculateElementHeight(el);
         const cacheKey = `${el.id}-${el.attributes?.length}-${el.methods?.length}-${el.stereotype}`;
         const cachedHeight = elementHeightCache.current.get(cacheKey);
-        
+
         if (cachedHeight !== newHeight) {
           elementHeightCache.current.set(cacheKey, newHeight);
-          if (newHeight !== el.height) {
+          // BUG H4 FIX: Only update when the difference exceeds 1px to absorb
+          // floating-point noise that would otherwise cause an infinite render loop.
+          if (Math.abs(newHeight - (el.height || 0)) > 1) {
             hasChanges = true;
             return { ...el, height: newHeight };
           }
@@ -431,11 +470,11 @@ const UMLEditor = () => {
       }
       return el;
     });
-    
+
     if (hasChanges) {
       setElements(updatedElements);
     }
-  }, [elements]);
+  }, [elements]); // eslint-disable-line react-hooks/exhaustive-deps
 
   /**
    * addElement(type)
@@ -463,15 +502,16 @@ const UMLEditor = () => {
     }
 
     const newElement = {
-      id: Date.now(),
+      id: nextId(),
       type,
       diagramType: selectedDiagram,
       x: 100 + (elements.length * 20),
       y: 100 + (elements.length * 20),
-      width: type === 'class' || type === 'component' || type === 'interface' || type === 'abstract' ? 200 : 150,
-      height: type === 'class' || type === 'component' || type === 'interface' || type === 'abstract' ? 150 : 100,
+      width: type === 'class' || type === 'component' || type === 'interface' || type === 'abstract' || type === 'enum' ? 200 : 150,
+      height: type === 'class' || type === 'component' || type === 'interface' || type === 'abstract' || type === 'enum' ? 150 : 100,
       name: `New${type.charAt(0).toUpperCase() + type.slice(1)}`,
-      attributes: (type === 'class' || type === 'abstract') ? [] : undefined,
+      // enum gets attributes (used as enum value list), no methods
+      attributes: (type === 'class' || type === 'abstract' || type === 'enum') ? [] : undefined,
       methods: (type === 'class' || type === 'interface' || type === 'abstract') ? [] : undefined,
       properties: {},
       stereotype: '',
@@ -521,7 +561,7 @@ const UMLEditor = () => {
         } else {
           if (connectionStart !== clickedElement.id) {
             const newConnection = {
-              id: Date.now(),
+              id: nextId(),
               type: selectedTool,
               from: connectionStart,
               to: clickedElement.id,
@@ -745,13 +785,27 @@ const UMLEditor = () => {
    *   interaction state flags so the next interaction starts clean.
    */
   const handleMouseUp = () => {
+    // BUG FIX: Use functional setState pattern to guarantee we read the
+    // latest elements/connections snapshot — the closure values may be
+    // one render behind after a drag/resize update.
     if (isDragging && selectedElements.length >= 1) {
-      saveToHistory(elements, connections);
+      setElements(latestEls => {
+        setConnections(latestConns => {
+          saveToHistory(latestEls, latestConns);
+          return latestConns;
+        });
+        return latestEls;
+      });
     }
     if (isResizing && selectedElements.length === 1) {
-      saveToHistory(elements, connections);
+      setElements(latestEls => {
+        setConnections(latestConns => {
+          saveToHistory(latestEls, latestConns);
+          return latestConns;
+        });
+        return latestEls;
+      });
     }
-    // Clear group-drag snapshots
     dragStartPositions.current = {};
     stopDragging();
     stopPanning();
@@ -906,29 +960,28 @@ const UMLEditor = () => {
    *   closure capture — a known minor quirk that doesn't affect correctness.
    */
   const handleImportCode = (importedElements, importedConnections) => {
-    // Merge or replace the diagram
+    let mergedElements;
+    let mergedConnections;
+
     if (elements.length === 0 && connections.length === 0) {
-      // If empty diagram, just replace
-      setElements(importedElements);
-      setConnections(importedConnections);
+      mergedElements    = importedElements;
+      mergedConnections = importedConnections;
     } else {
-      // If diagram exists, offset the new elements to avoid overlap
+      // Offset imported elements so they don't overlap existing ones
       const maxX = Math.max(...elements.map(e => e.x + e.width), 0);
-      const offsetElements = importedElements.map(el => ({
-        ...el,
-        x: el.x + maxX + 100 // Add offset to avoid overlap
-      }));
-      setElements([...elements, ...offsetElements]);
-      setConnections([...connections, ...importedConnections]);
+      mergedElements = [
+        ...elements,
+        ...importedElements.map(el => ({ ...el, x: el.x + maxX + 100 }))
+      ];
+      mergedConnections = [...connections, ...importedConnections];
     }
-    
-    // Save to history
-    saveToHistory(
-      [...elements, ...importedElements],
-      [...connections, ...importedConnections]
-    );
-    
-    // Show success message
+
+    // BUG C4 FIX: set state AND save history with identical arrays so
+    // Ctrl+Z restores the correctly-positioned (offset) elements.
+    setElements(mergedElements);
+    setConnections(mergedConnections);
+    saveToHistory(mergedElements, mergedConnections);
+
     showToast(`Successfully imported ${importedElements.length} classes from code!`, 'success');
   };
 
@@ -1041,12 +1094,15 @@ const UMLEditor = () => {
           setSelectedElements([]);
           setSelectedConnection(null);
           resetHistory(data.elements || [], data.connections || []);
+          showToast('Diagram imported successfully!', 'success');
         } catch (error) {
           showToast('Error loading file: Invalid JSON format', 'error');
         }
       };
       reader.readAsText(file);
     }
+    // Fix: reset the input so the same file can be re-imported
+    e.target.value = '';
   };
 
   /**
@@ -1057,6 +1113,9 @@ const UMLEditor = () => {
    *   replace the history stack with a single empty snapshot.
    */
   const handleNew = () => {
+    if (elements.length > 0 || connections.length > 0) {
+      if (!window.confirm('Clear the canvas and start a new diagram? Unsaved changes will be lost.')) return;
+    }
     setElements([]);
     setConnections([]);
     resetHistory([], []);
@@ -1109,11 +1168,18 @@ const UMLEditor = () => {
           onZoomOut={handleZoomOut}
           showGrid={showGrid}
           onToggleGrid={toggleGrid}
-          onUndo={undo}
-          onRedo={redo}
+          onUndo={() => { undo(setElements, setConnections); setSelectedElements([]); setSelectedConnection(null); }}
+          onRedo={() => { redo(setElements, setConnections); setSelectedElements([]); setSelectedConnection(null); }}
           canUndo={canUndo}
           canRedo={canRedo}
           selectedDiagram={selectedDiagram}
+          currentUser={currentUser}
+          onLoginClick={() => setShowLoginModal(true)}
+          onLogout={() => {
+            localStorage.removeItem(TOKEN_KEY);
+            setCurrentUser(null);
+            showToast('Logged out successfully.', 'info');
+          }}
         />
 
         {/* Tool Palette */}
@@ -1813,8 +1879,41 @@ const UMLEditor = () => {
                     </g>
                   )}
 
+                  {/* Enum Element */}
+                  {element.type === 'enum' && (
+                    <>
+                      <rect
+                        x={element.x} y={element.y}
+                        width={element.width} height={element.height}
+                        fill="#2d2d30"
+                        stroke={selectedElements.some(el => el.id === element.id) ? '#007acc' : '#3e3e42'}
+                        strokeWidth={selectedElements.some(el => el.id === element.id) ? 2 : 1}
+                        rx="4"
+                      />
+                      <text x={element.x + element.width / 2} y={element.y + 16}
+                        fill="#888" fontSize="10" textAnchor="middle" fontStyle="italic">
+                        «enum»
+                      </text>
+                      <line x1={element.x} y1={element.y + 28} x2={element.x + element.width} y2={element.y + 28} stroke="#3e3e42" />
+                      <text x={element.x + element.width / 2} y={element.y + 44}
+                        fill="white" fontSize="14" fontWeight="bold" textAnchor="middle">
+                        {element.name}
+                      </text>
+                      {(element.attributes || []).length > 0 && (
+                        <line x1={element.x} y1={element.y + 54} x2={element.x + element.width} y2={element.y + 54} stroke="#3e3e42" />
+                      )}
+                      {(element.attributes || []).map((val, idx) => (
+                        <text key={`enum-val-${idx}`}
+                          x={element.x + 10} y={element.y + 70 + idx * 18}
+                          fill="#cccccc" fontSize="11" fontFamily="monospace">
+                          {val.name}
+                        </text>
+                      ))}
+                    </>
+                  )}
+
                   {/* Generic Rectangle for other types */}
-                  {!['class', 'interface', 'abstract', 'component', 'package', 'usecase', 'actor'].includes(element.type) && (
+                  {!['class', 'interface', 'abstract', 'enum', 'object', 'component', 'package', 'usecase', 'actor'].includes(element.type) && (
                     <>
                       <rect
                         x={element.x}
@@ -1929,7 +2028,8 @@ const UMLEditor = () => {
         setSelectedElements={setSelectedElements}
         setConnections={setConnections}
         setSelectedConnection={setSelectedConnection}
-        saveToHistory={() => saveToHistory(elements, connections)}
+        saveToHistory={saveToHistory}
+        onCopySuccess={(msg, type = 'success') => showToast(msg, type)}
         language={language}
         generatedCode={generatedCode}
         generatedFiles={generatedFiles}

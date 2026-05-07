@@ -3,7 +3,13 @@
 // login.php — POST /api/login
 // ============================================================
 // Body (JSON): { "email": "...", "password": "..." }
-// Returns:     { "token": "<JWT>", "user": { "id", "email" } }
+// Returns:     { "token": "<JWT>", "user": { "uid", "email" } }
+//
+// BUG 2 FIX: Password is no longer trimmed. Spaces are valid
+//   password characters. Trimming caused a register/login mismatch
+//   when the JS side stopped trimming after our bug fixes.
+//
+// BUG 8 FIX: null guard on json_decode result.
 // ============================================================
 
 require_once __DIR__ . '/cors.php';
@@ -18,11 +24,18 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
     exit;
 }
 
-// ── Parse request body ────────────────────────────────────────────────────────
+// BUG 8 FIX: Guard against null body from malformed/empty request
 $body = json_decode(file_get_contents('php://input'), true);
+if (!is_array($body)) {
+    http_response_code(400);
+    echo json_encode(['error' => 'Invalid JSON body.']);
+    exit;
+}
 
 $email    = trim($body['email']    ?? '');
-$password = trim($body['password'] ?? '');
+// BUG 2 FIX: Do NOT trim the password — must match exactly what
+// was stored at registration time (which is also untrimmed now).
+$password = $body['password'] ?? '';
 
 if ($email === '' || $password === '') {
     http_response_code(400);
@@ -32,13 +45,14 @@ if ($email === '' || $password === '') {
 
 $pdo = getPDO();
 
-// ── Fetch user by email ───────────────────────────────────────────────────────
+// Fetch user by email
 $stmt = $pdo->prepare('SELECT id, email, password_hash FROM users WHERE email = ?');
 $stmt->execute([$email]);
 $user = $stmt->fetch();
 
-// Use a timing-safe comparison even on "not found" to prevent user enumeration
-$dummyHash = '$2y$10$usesomesillystringfore7hnbRJHxXVLeakoG8K30oukPsA.ztMG';
+// Timing-safe comparison — always run password_verify even when user
+// not found, to prevent user-enumeration via timing side-channel.
+$dummyHash   = '$2y$10$usesomesillystringfore7hnbRJHxXVLeakoG8K30oukPsA.ztMG';
 $hashToCheck = $user ? $user['password_hash'] : $dummyHash;
 
 if (!$user || !password_verify($password, $hashToCheck)) {
@@ -47,7 +61,7 @@ if (!$user || !password_verify($password, $hashToCheck)) {
     exit;
 }
 
-// ── Issue JWT (expires in 7 days) ─────────────────────────────────────────────
+// Issue JWT (expires in 7 days)
 $payload = [
     'sub'   => $user['id'],
     'email' => $user['email'],
@@ -60,7 +74,7 @@ $token = jwtEncode($payload);
 echo json_encode([
     'token' => $token,
     'user'  => [
-        'uid'   => (string) $user['id'],   // named 'uid' to match Firebase User shape
+        'uid'   => (string) $user['id'],
         'email' => $user['email'],
     ],
 ]);

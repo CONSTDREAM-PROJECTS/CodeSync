@@ -2,22 +2,33 @@
 // ============================================================
 // cors.php — CORS Headers (included by every endpoint)
 // ============================================================
-// REACT_ORIGIN: set this to where your React app is hosted.
-// During local development use http://localhost:3000
-// In production use your actual domain, e.g. https://mysite.com
+// BUG 4 FIX: Original had a hardcoded localhost:3000 origin AND
+// the if/else both sent the same value regardless of the request
+// origin — blocking all production requests.
+// FIX: Maintain an explicit allowlist; only reflect origins that
+// are in that list. Add your Hostinger domain and Vercel URL here.
 // ============================================================
 
-define('REACT_ORIGIN', 'http://localhost:3000'); // ← change for production
+$ALLOWED_ORIGINS = [
+    'http://localhost:3000',           // local React dev (CRA)
+    'http://localhost:5173',           // local React dev (Vite)
+    'admin.codesynch.tech',          // ← your Hostinger domain
+    'https://codesynch.tech',      // ← with www
+];
 
 function setCorsHeaders(): void {
+    global $ALLOWED_ORIGINS;
+
     $origin = $_SERVER['HTTP_ORIGIN'] ?? '';
 
-    // Allow requests from the React app origin
-    if ($origin === REACT_ORIGIN) {
-        header('Access-Control-Allow-Origin: ' . REACT_ORIGIN);
+    // Only reflect an origin that is in the allowlist.
+    // Reflecting every origin defeats CORS protection.
+    if (in_array($origin, $ALLOWED_ORIGINS, true)) {
+        header('Access-Control-Allow-Origin: ' . $origin);
     } else {
-        // Still set it (browser will block non-matching origins by CORS policy)
-        header('Access-Control-Allow-Origin: ' . REACT_ORIGIN);
+        // Fallback — send first allowed origin so non-browser clients
+        // (Postman, curl) still work during development.
+        header('Access-Control-Allow-Origin: ' . $ALLOWED_ORIGINS[0]);
     }
 
     header('Access-Control-Allow-Credentials: true');

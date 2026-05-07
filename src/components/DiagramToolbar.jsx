@@ -85,7 +85,10 @@ const DiagramToolbar = ({
   onRedo,
   canUndo,
   canRedo,
-  selectedDiagram = 'class'
+  selectedDiagram = 'class',
+  currentUser = null,
+  onLoginClick,
+  onLogout,
 }) => {
   /**
    * supportsCodeImport / supportsLanguageSelect
@@ -239,6 +242,30 @@ const DiagramToolbar = ({
           <Code size={18} />
           <span className="text-sm font-medium">{generateButtonLabel}</span>
         </button>
+
+        {/* BUG C2 + M2 FIX: Login / Logout button */}
+        {currentUser ? (
+          <div className="flex items-center gap-1 ml-1">
+            <span className="text-xs text-gray-400 max-w-[120px] truncate" title={currentUser.email}>
+              👤 {currentUser.email}
+            </span>
+            <button
+              onClick={onLogout}
+              className="px-2 py-1.5 rounded text-xs bg-[#3c3c3c] hover:bg-[#4a4a4f] text-gray-300 transition-colors flex-shrink-0"
+              title="Log out"
+            >
+              Log Out
+            </button>
+          </div>
+        ) : (
+          <button
+            onClick={onLoginClick}
+            className="btn-primary px-3 py-1.5 rounded text-sm font-medium transition-colors flex-shrink-0"
+            title="Log in to enable cloud save"
+          >
+            Log In
+          </button>
+        )}
       </div>
     </div>
   );
