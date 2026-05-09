@@ -11,6 +11,7 @@ ob_start();
 
 $ALLOWED_ORIGINS = [
     'https://admin.codesynch.tech',
+    'https://codesynch.tech',
     'http://localhost:3000',              // local dev (CRA)
     'http://localhost:5173',             // local dev (Vite)
 ];
