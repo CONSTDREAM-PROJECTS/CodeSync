@@ -272,7 +272,7 @@ class ValidationService {
       .filter(t => t.tokenType === TOKEN_TYPES.ATTRIBUTE)
       .forEach(token => {
         const type = token.attributes?.type;
-        if (!type || !type.trim() || type.trim() === 'Object' && !token.attributes._typeWasExplicit) {
+        if (!type || !type.trim() || (type.trim() === 'Object' && !token.attributes._typeWasExplicit)) {
           // We only warn here if type is completely absent (Object is a valid fallback)
           if (!type || !type.trim()) {
             errors.push(this._issue(

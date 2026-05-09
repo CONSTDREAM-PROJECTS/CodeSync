@@ -82,7 +82,7 @@ function highlightCode(code, language) {
   const regex = /(\/\/[^\n]*|\/\*[\s\S]*?\*\/|#[^\n]*)|("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|`(?:[^`\\]|\\.)*`)|(\b\d+\.?\d*\b)|([A-Za-z_$][A-Za-z0-9_$]*)|(\s+)|([^\w\s])/g;
   let match;
   while ((match = regex.exec(code)) !== null) {
-    const [full, comment, str, num, word, space, other] = match;
+    const [full, comment, str, num, word, _space, _other] = match;
     if (comment)      tokens.push({ text: full, type: 'comment' });
     else if (str)     tokens.push({ text: full, type: 'string' });
     else if (num)     tokens.push({ text: full, type: 'number' });

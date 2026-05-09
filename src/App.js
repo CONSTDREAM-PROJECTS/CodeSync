@@ -2,11 +2,15 @@ import React, { useState } from 'react';
 import UMLEditor from './components/UMLEditor';
 import { Menu, Github, Book } from 'lucide-react';
 import LoginModal from './components/LoginModal';
+import AboutPage from './components/AboutPage';
+import ContactPage from './components/ContactPage';
 import './App.css';
 
 function App() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [showLogin, setShowLogin] = useState(false);
+  const [showAbout, setShowAbout] = useState(false);
+  const [showContact, setShowContact] = useState(false);
 
   return (
     <div className="h-screen flex flex-col bg-[#1e1e1e]">
@@ -20,10 +24,10 @@ function App() {
             onError={(e) => { e.target.style.display = 'none'; }}
           />
           <div className="hidden md:flex items-center space-x-1">
-            <button className="px-3 py-1.5 text-sm text-gray-300 hover:text-white hover:bg-[#3e3e42] rounded transition-colors">
+            <button onClick={() => setShowAbout(true)} className="px-3 py-1.5 text-sm text-gray-300 hover:text-white hover:bg-[#3e3e42] rounded transition-colors">
               About Us
             </button>
-            <button className="px-3 py-1.5 text-sm text-gray-300 hover:text-white hover:bg-[#3e3e42] rounded transition-colors">
+            <button onClick={() => setShowContact(true)} className="px-3 py-1.5 text-sm text-gray-300 hover:text-white hover:bg-[#3e3e42] rounded transition-colors">
               Contact Us
             </button>
           </div>
@@ -77,10 +81,10 @@ function App() {
       {sidebarOpen && (
         <div className="md:hidden fixed inset-0 bg-black bg-opacity-50 z-50" onClick={() => setSidebarOpen(false)}>
           <div className="absolute right-0 top-0 h-full w-64 bg-[#252526] p-4" onClick={(e) => e.stopPropagation()}>
-            <button className="w-full text-left px-3 py-2 text-sm text-gray-300 hover:bg-[#2a2d2e] rounded">
+            <button onClick={() => { setShowAbout(true); setSidebarOpen(false); }} className="w-full text-left px-3 py-2 text-sm text-gray-300 hover:bg-[#2a2d2e] rounded">
               About Us
             </button>
-            <button className="w-full text-left px-3 py-2 text-sm text-gray-300 hover:bg-[#2a2d2e] rounded">
+            <button onClick={() => { setShowContact(true); setSidebarOpen(false); }} className="w-full text-left px-3 py-2 text-sm text-gray-300 hover:bg-[#2a2d2e] rounded">
               Contact Us
             </button>
             <button className="w-full text-left px-3 py-2 text-sm text-gray-300 hover:bg-[#2a2d2e] rounded">
@@ -90,7 +94,9 @@ function App() {
         </div>
       )}
 
-        {showLogin && <LoginModal onClose={() => setShowLogin(false)} />}
+      {showLogin && <LoginModal onClose={() => setShowLogin(false)} />}
+      {showAbout && <AboutPage onClose={() => setShowAbout(false)} />}
+      {showContact && <ContactPage onClose={() => setShowContact(false)} />}
     </div>
   );
 }

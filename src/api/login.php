@@ -43,6 +43,13 @@ if ($email === '' || $password === '') {
     exit;
 }
 
+// Gmail-only restriction
+if (!str_ends_with($email, '@gmail.com')) {
+    http_response_code(400);
+    echo json_encode(['error' => 'Only Gmail addresses (@gmail.com) are accepted.']);
+    exit;
+}
+
 $pdo = getPDO();
 
 // Fetch user by email

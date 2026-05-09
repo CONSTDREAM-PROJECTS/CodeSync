@@ -32,10 +32,11 @@ export const TOKEN_KEY = 'codesynch_token';
 // Configuration — keep in sync with LoginModal.jsx API_BASE_URL
 // ─────────────────────────────────────────────────────────────
 
+// React app and PHP API are on the same Hostinger domain.
 const API_BASE_URL =
   process.env.NODE_ENV === 'production'
-    ? 'https://yourdomain.com/api'   // ← your Hostinger domain
-    : 'http://localhost/api';        // ← local dev
+    ? 'https://admin.codesynch.tech/api'
+    : 'http://localhost/api';
 
 // ─────────────────────────────────────────────────────────────
 // Internal helpers

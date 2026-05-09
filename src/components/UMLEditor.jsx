@@ -57,7 +57,6 @@
 
 import React, { useState, useRef, useEffect } from 'react';
 import CodeGenerator from '../services/codeGenerator';
-import CodeToUMLConverter from '../services/codeToUMLConverter';
 import TokenizationService from '../services/TokenizationService';
 import ValidationService from '../services/ValidationService';
 import DiagramService from '../services/diagramService';
@@ -196,7 +195,6 @@ const UMLEditor = () => {
     isDragging,
     isPanning,
     panOffset,
-    setPanOffset,
     zoom,
     showGrid,
     canvasRef,
@@ -728,6 +726,8 @@ const UMLEditor = () => {
         case 'e':
           newWidth = originalElement.width + deltaX * zoomFactor;
           break;
+        default:
+          break;
       }
 
       // Ensure minimum size
@@ -1173,13 +1173,6 @@ const UMLEditor = () => {
           canUndo={canUndo}
           canRedo={canRedo}
           selectedDiagram={selectedDiagram}
-          currentUser={currentUser}
-          onLoginClick={() => setShowLoginModal(true)}
-          onLogout={() => {
-            localStorage.removeItem(TOKEN_KEY);
-            setCurrentUser(null);
-            showToast('Logged out successfully.', 'info');
-          }}
         />
 
         {/* Tool Palette */}

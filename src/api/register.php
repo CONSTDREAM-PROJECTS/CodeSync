@@ -60,9 +60,28 @@ if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
     exit;
 }
 
-if (strlen($password) < 6) {
+// Gmail-only restriction
+if (!str_ends_with($email, '@gmail.com')) {
     http_response_code(400);
-    echo json_encode(['error' => 'Password must be at least 6 characters.']);
+    echo json_encode(['error' => 'Only Gmail addresses (@gmail.com) are accepted.']);
+    exit;
+}
+
+if (strlen($password) < 8) {
+    http_response_code(400);
+    echo json_encode(['error' => 'Password must be at least 8 characters.']);
+    exit;
+}
+
+if (!preg_match('/\d/', $password)) {
+    http_response_code(400);
+    echo json_encode(['error' => 'Password must contain at least one number (0–9).']);
+    exit;
+}
+
+if (!preg_match('/[^a-zA-Z0-9]/', $password)) {
+    http_response_code(400);
+    echo json_encode(['error' => 'Password must contain at least one special character (e.g. !@#$%^&*).']);
     exit;
 }
 

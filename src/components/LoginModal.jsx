@@ -1,93 +1,67 @@
 /**
  * ============================================================
- * LoginModal.jsx — Authentication Modal (PHP/MySQL + JWT)
+ * LoginModal.jsx — Authentication Modal (Email + Google + GitHub)
  * ============================================================
  *
- * BUGS FIXED:
+ * Three auth paths, all using your own PHP backend (no Firebase):
+ *   1. Email / password  — POST /api/login or /api/register
+ *   2. Google OAuth      — opens /api/oauth/google in a popup,
+ *                          PHP handles the full OAuth flow,
+ *                          redirects to /oauth-callback which
+ *                          postMessages the token back here.
+ *   3. GitHub OAuth      — same pattern via /api/oauth/github
  *
- * BUG 1 — API_BASE_URL pointed to InfinityFree, not Hostinger.
- *   FIX: Updated to Hostinger domain pattern.
- *
- * BUG 2 — No session restore on page refresh.
- *   After a refresh currentUser was always null even with a valid
- *   token in localStorage, forcing the user to log in again every time.
- *   FIX: Exported restoreSession() helper. Call it in UMLEditor on mount.
- *
- * BUG 3 — Password was trimmed before sending to PHP.
- *   trim() strips leading/trailing spaces which are valid password
- *   characters. register.php does NOT trim, so a password like
- *   " secret" would register fine but then fail login because login
- *   side trimmed it into "secret" — a different string.
- *   FIX: Removed trim() from password field only.
- *
- * BUG 4 — handleRegister made two round-trips (register then login).
- *   FIX: Updated register.php now returns token + user on 201 directly.
- *   Falls back to separate login call for backward compat with old PHP.
+ * The popup approach means the user never leaves the editor page.
  * ============================================================
  */
 
-import React, { useState, useEffect } from 'react';
-import { Loader } from 'lucide-react';
+import React, { useState, useEffect, useRef } from 'react';
+import { Loader, Github, Chrome, Check, X } from 'lucide-react';
+// TOKEN_KEY lives in diagramService — import first, then re-export below
+// so UMLEditor can do: import { TOKEN_KEY } from './LoginModal'
 import { TOKEN_KEY } from '../services/diagramService';
+export { TOKEN_KEY };
+
+// ─────────────────────────────────────────────────────────────
+// Password strength rules
+// ─────────────────────────────────────────────────────────────
+
+const PASSWORD_RULES = [
+  { id: 'length',  label: 'At least 8 characters',           test: (p) => p.length >= 8 },
+  { id: 'number',  label: 'At least one number (0–9)',        test: (p) => /\d/.test(p) },
+  { id: 'special', label: 'At least one special character (!@#$%^&* etc.)', test: (p) => /[^a-zA-Z0-9]/.test(p) },
+];
+
+const validatePassword = (password) => PASSWORD_RULES.every(r => r.test(password));
+const getPasswordErrors = (password) => PASSWORD_RULES.filter(r => !r.test(password)).map(r => r.label);
 
 // ─────────────────────────────────────────────────────────────
 // Configuration
 // ─────────────────────────────────────────────────────────────
 
-/**
- * API_BASE_URL — BUG FIX: Was pointing to localhost/codesynch/api.
- * On Hostinger files live at public_html/api/ → https://yourdomain.com/api
- * Change 'yourdomain.com' to your actual Hostinger domain.
- */
+// API_BASE_URL — React app and PHP API are on the same Hostinger domain.
+// In production:  https://admin.codesynch.tech/api
+// In local dev:   http://localhost/api  (adjust if your local path differs)
 const API_BASE_URL =
   process.env.NODE_ENV === 'production'
-    ? 'https://codesynch.tech/api'   // ← your Hostinger domain
-    : 'http://admin.codesynch.tech/api'; // ← local dev (adjust if in a subfolder)
-
-// TOKEN_KEY — imported from diagramService (the single source of truth).
-// Re-exported here so UMLEditor can still do:
-//   import { restoreSession, TOKEN_KEY } from './LoginModal'
-export { TOKEN_KEY } from '../services/diagramService';
+    ? 'https://admin.codesynch.tech/api'
+    : 'http://localhost/api';
 
 // ─────────────────────────────────────────────────────────────
-// Session restore helper — import and call this in UMLEditor
+// Session restore helper (used by UMLEditor on mount)
 // ─────────────────────────────────────────────────────────────
 
-/**
- * restoreSession()
- * LAYMAN'S: On page load, checks if there is a saved login token.
- *   If the token is still valid (not expired), returns the user
- *   object so UMLEditor can skip showing the login modal.
- * TECHNICAL: Decodes the JWT payload locally — no network call.
- *   Returns null if no token, malformed, or expired.
- *
- * HOW TO USE IN UMLEditor.jsx:
- *   import { restoreSession, TOKEN_KEY } from './components/LoginModal';
- *   useEffect(() => {
- *     const user = restoreSession();
- *     if (user) setCurrentUser(user);
- *   }, []);
- *
- * HOW TO LOGOUT IN UMLEditor.jsx:
- *   localStorage.removeItem(TOKEN_KEY);
- *   setCurrentUser(null);
- */
 export const restoreSession = () => {
   try {
     const token = localStorage.getItem(TOKEN_KEY);
     if (!token) return null;
 
     const parts = token.split('.');
-    if (parts.length !== 3) {
-      localStorage.removeItem(TOKEN_KEY);
-      return null;
-    }
+    if (parts.length !== 3) { localStorage.removeItem(TOKEN_KEY); return null; }
 
-    // Decode JWT payload — re-add base64 padding stripped during encoding
     const padded  = parts[1].replace(/-/g, '+').replace(/_/g, '/');
     const payload = JSON.parse(atob(padded));
 
-    // exp is in seconds; Date.now() is milliseconds
     if (payload.exp && payload.exp * 1000 < Date.now()) {
       localStorage.removeItem(TOKEN_KEY);
       return null;
@@ -105,19 +79,76 @@ export const restoreSession = () => {
 // ─────────────────────────────────────────────────────────────
 
 const LoginModal = ({ onClose, onLoginSuccess }) => {
-  const [email,     setEmail]     = useState('');
-  const [password,  setPassword]  = useState('');
-  const [isLoading, setIsLoading] = useState(false);
-  const [error,     setError]     = useState('');
-  const [mode,      setMode]      = useState('login'); // 'login' | 'register'
+  const [email,        setEmail]        = useState('');
+  const [password,     setPassword]     = useState('');
+  const [isLoading,    setIsLoading]    = useState(false);
+  const [oauthLoading, setOauthLoading] = useState('');
+  const [error,        setError]        = useState('');
+  const [mode,         setMode]         = useState('login');
+  const [showRules,    setShowRules]    = useState(false);
+  const popupRef = useRef(null);
 
-  // If a valid token already exists, close the modal immediately
+  // ── Restore existing session on open ──────────────────────
   useEffect(() => {
     const user = restoreSession();
     if (user) { onLoginSuccess?.(user); onClose(); }
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // ── Shared POST helper ─────────────────────────────────────────────────────
+  // ── Listen for OAuth popup postMessage ────────────────────
+  // OAuthCallback.jsx sends window.opener.postMessage() after
+  // the PHP callback redirects back with the token.
+  useEffect(() => {
+    const handleMessage = (event) => {
+      // Security: only accept messages from our own origin
+      if (event.origin !== window.location.origin) return;
+
+      const { type, token, user, error: oauthError } = event.data || {};
+
+      if (type === 'OAUTH_SUCCESS' && token) {
+        // Build user object — uid comes from JWT payload
+        try {
+          const parts   = token.split('.');
+          const payload = JSON.parse(atob(
+            parts[1].replace(/-/g, '+').replace(/_/g, '/')
+          ));
+          const resolvedUser = {
+            uid:   String(payload.sub),
+            email: payload.email || user?.email || '',
+          };
+          localStorage.setItem(TOKEN_KEY, token);
+          setOauthLoading('');
+          onLoginSuccess?.(resolvedUser);
+          onClose();
+        } catch {
+          setError('OAuth login succeeded but token was malformed. Please try again.');
+          setOauthLoading('');
+        }
+      }
+
+      if (type === 'OAUTH_ERROR') {
+        setError(oauthError || 'OAuth sign-in failed. Please try again.');
+        setOauthLoading('');
+      }
+    };
+
+    window.addEventListener('message', handleMessage);
+    return () => window.removeEventListener('message', handleMessage);
+  }, [onLoginSuccess, onClose]);
+
+  // ── Clean up popup if user closes it manually ─────────────
+  useEffect(() => {
+    if (!oauthLoading) return;
+    const interval = setInterval(() => {
+      if (popupRef.current?.closed) {
+        setOauthLoading('');
+        setError('Sign-in popup was closed. Please try again.');
+        clearInterval(interval);
+      }
+    }, 500);
+    return () => clearInterval(interval);
+  }, [oauthLoading]);
+
+  // ── Shared POST helper ────────────────────────────────────
   const _post = async (endpoint, body) => {
     const res  = await fetch(`${API_BASE_URL}/${endpoint}`, {
       method:  'POST',
@@ -129,51 +160,99 @@ const LoginModal = ({ onClose, onLoginSuccess }) => {
     return json;
   };
 
-  // ── Login ──────────────────────────────────────────────────────────────────
+  // ── Email login ───────────────────────────────────────────
   const handleLogin = async () => {
-    // BUG FIX: Only trim email, NOT password — spaces are valid password chars
     const json = await _post('login', { email: email.trim(), password });
     localStorage.setItem(TOKEN_KEY, json.token);
-    onLoginSuccess?.(json.user); // { uid, email }
+    onLoginSuccess?.(json.user);
     onClose();
   };
 
-  // ── Register ───────────────────────────────────────────────────────────────
+  // ── Email register ────────────────────────────────────────
   const handleRegister = async () => {
-    // BUG FIX: Only trim email, NOT password
     const json = await _post('register', { email: email.trim(), password });
-    // Updated register.php returns token + user on 201 — one round trip
     if (json.token) {
       localStorage.setItem(TOKEN_KEY, json.token);
       onLoginSuccess?.(json.user);
       onClose();
     } else {
-      // Fallback for old register.php that returns only { message }
       await handleLogin();
     }
   };
 
-  // ── Submit ─────────────────────────────────────────────────────────────────
+  // ── Email form submit ─────────────────────────────────────
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError('');
-    if (!email.trim())  { setError('Please enter your email address.'); return; }
-    if (!password)      { setError('Please enter your password.');       return; }
+    if (!email.trim()) { setError('Please enter your email address.'); return; }
+
+    // Gmail-only restriction — check before hitting the server
+    if (!email.trim().toLowerCase().endsWith('@gmail.com')) {
+      setError('Only Gmail addresses (@gmail.com) are accepted. Please use your Google email.');
+      return;
+    }
+
+    if (!password) { setError('Please enter your password.'); return; }
+
+    // Enforce password rules only on registration
+    if (mode === 'register' && !validatePassword(password)) {
+      setShowRules(true);
+      setError('Password does not meet the requirements below.');
+      return;
+    }
 
     setIsLoading(true);
     try {
       mode === 'login' ? await handleLogin() : await handleRegister();
     } catch (err) {
-      setError(err.message || 'Authentication failed. Please try again.');
+      // "Failed to fetch" means the API server is unreachable — give a clear message
+      if (err.message === 'Failed to fetch' || err.message.includes('NetworkError') || err.message.includes('fetch')) {
+        setError('Cannot reach the server. Please check your internet connection or try again in a moment.');
+      } else {
+        setError(err.message || 'Authentication failed. Please try again.');
+      }
     } finally {
       setIsLoading(false);
     }
   };
 
+  // ── OAuth popup opener ────────────────────────────────────
+  const handleOAuth = (provider) => {
+    setError('');
+    setOauthLoading(provider);
+
+    // Open the PHP OAuth endpoint in a small centred popup
+    const width  = 520;
+    const height = 620;
+    const left   = Math.round(window.screenX + (window.outerWidth  - width)  / 2);
+    const top    = Math.round(window.screenY + (window.outerHeight - height) / 2);
+
+    const oauthUrl = `${API_BASE_URL}/oauth/${provider}`;
+
+    popupRef.current = window.open(
+      oauthUrl,
+      `codesynch_oauth_${provider}`,
+      `width=${width},height=${height},left=${left},top=${top},` +
+      `scrollbars=yes,resizable=yes,toolbar=no,menubar=no,location=no`
+    );
+
+    if (!popupRef.current) {
+      setOauthLoading('');
+      setError(
+        'Popup was blocked by your browser. ' +
+        'Please allow popups for this site and try again.'
+      );
+    }
+  };
+
+  // ── Render ────────────────────────────────────────────────
+  const anyLoading = isLoading || oauthLoading !== '';
+
   return (
     <div className="modal-overlay" onClick={onClose}>
       <div className="login-card" onClick={(e) => e.stopPropagation()}>
 
+        {/* Logo */}
         <div className="login-logo">
           <img
             src="/const_dream_logo.png"
@@ -182,43 +261,115 @@ const LoginModal = ({ onClose, onLoginSuccess }) => {
           />
         </div>
 
+        {/* Mode toggle */}
         <div className="flex border border-[#3e3e42] rounded-lg overflow-hidden mb-4">
           <button type="button"
-            onClick={() => { setMode('login'); setError(''); }}
-            className={`flex-1 py-1.5 text-sm transition-colors ${mode === 'login' ? 'bg-[#007acc] text-white' : 'bg-[#2d2d30] text-gray-400 hover:text-white'}`}
+            onClick={() => { setMode('login'); setError(''); setShowRules(false); }}
+            disabled={anyLoading}
+            className={`flex-1 py-1.5 text-sm transition-colors ${
+              mode === 'login'
+                ? 'bg-[#007acc] text-white'
+                : 'bg-[#2d2d30] text-gray-400 hover:text-white'
+            }`}
           >Log In</button>
           <button type="button"
             onClick={() => { setMode('register'); setError(''); }}
-            className={`flex-1 py-1.5 text-sm transition-colors ${mode === 'register' ? 'bg-[#007acc] text-white' : 'bg-[#2d2d30] text-gray-400 hover:text-white'}`}
+            disabled={anyLoading}
+            className={`flex-1 py-1.5 text-sm transition-colors ${
+              mode === 'register'
+                ? 'bg-[#007acc] text-white'
+                : 'bg-[#2d2d30] text-gray-400 hover:text-white'
+            }`}
           >Create Account</button>
         </div>
 
         <form onSubmit={handleSubmit} className="login-form">
-          <input type="email" placeholder="Email"
+          <input type="email" placeholder="your.email@gmail.com"
             value={email} onChange={(e) => setEmail(e.target.value)}
-            className="login-input" autoFocus disabled={isLoading}
+            className="login-input" autoFocus disabled={anyLoading}
           />
+          {mode === 'register' && (
+            <p className="text-xs text-gray-500 -mt-1 px-1">
+              Only Gmail addresses are accepted.
+            </p>
+          )}
           <input type="password" placeholder="Password"
-            value={password} onChange={(e) => setPassword(e.target.value)}
-            className="login-input" disabled={isLoading}
+            value={password} onChange={(e) => {
+              setPassword(e.target.value);
+              if (mode === 'register') setShowRules(true);
+            }}
+            onFocus={() => { if (mode === 'register') setShowRules(true); }}
+            className="login-input" disabled={anyLoading}
           />
 
+          {/* Live password requirements — register mode only */}
+          {mode === 'register' && showRules && (
+            <div className="bg-[#1e1e1e] border border-[#3e3e42] rounded-lg px-3 py-2 space-y-1">
+              <p className="text-xs text-gray-400 font-semibold mb-1">Password requirements:</p>
+              {PASSWORD_RULES.map(rule => {
+                const passed = rule.test(password);
+                return (
+                  <div key={rule.id} className={`flex items-center gap-2 text-xs ${passed ? 'text-green-400' : 'text-gray-500'}`}>
+                    {passed
+                      ? <Check size={12} className="flex-shrink-0 text-green-400" />
+                      : <X     size={12} className="flex-shrink-0 text-red-500" />
+                    }
+                    <span>{rule.label}</span>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {/* Inline error */}
           {error && (
             <div className="bg-red-900 border border-red-700 text-red-200 text-xs px-3 py-2 rounded-lg">
               {error}
             </div>
           )}
 
-          <button className="login-btn flex items-center justify-center gap-2"
-            type="submit" disabled={isLoading}>
+          {/* Submit */}
+          <button
+            className="login-btn flex items-center justify-center gap-2"
+            type="submit"
+            disabled={anyLoading}
+          >
             {isLoading
               ? <><Loader size={14} className="animate-spin" /> Authenticating…</>
-              : mode === 'login' ? 'Log In' : 'Create Account'}
+              : mode === 'login' ? 'Log In' : 'Create Account'
+            }
           </button>
 
-          <p className="text-center text-xs text-gray-500 mt-2">
-            Sign in with your CodeSynch account
-          </p>
+          {/* Divider */}
+          <div className="login-or"><span /> or continue with <span /></div>
+
+          {/* Social buttons */}
+          <div className="login-socials">
+            <button
+              type="button"
+              className="social-btn flex items-center justify-center gap-2 relative"
+              title="Sign in with GitHub"
+              onClick={() => handleOAuth('github')}
+              disabled={anyLoading}
+            >
+              {oauthLoading === 'github'
+                ? <Loader size={18} className="animate-spin" />
+                : <Github size={18} />
+              }
+            </button>
+            <button
+              type="button"
+              className="social-btn flex items-center justify-center gap-2 relative"
+              title="Sign in with Google"
+              onClick={() => handleOAuth('google')}
+              disabled={anyLoading}
+            >
+              {oauthLoading === 'google'
+                ? <Loader size={18} className="animate-spin" />
+                : <Chrome size={18} />
+              }
+            </button>
+          </div>
         </form>
       </div>
     </div>
