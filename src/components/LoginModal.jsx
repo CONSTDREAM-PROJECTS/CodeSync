@@ -44,8 +44,8 @@ const getPasswordErrors = (password) => PASSWORD_RULES.filter(r => !r.test(passw
 // In local dev:   http://localhost/api  (adjust if your local path differs)
 const API_BASE_URL =
   process.env.NODE_ENV === 'production'
-    ? 'https://admin.codesynch.tech/api'
-    : 'https://admin.codesynch.tech/api';
+    ? 'https://api.codesynch.tech/api'
+    : 'https://api.codesynch.tech/api';
 
 // ─────────────────────────────────────────────────────────────
 // Session restore helper (used by UMLEditor on mount)
