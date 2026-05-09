@@ -161,7 +161,12 @@ class CodeToUMLConverter {
     const isDefinitivelyPlantUML = (
       sourceCode.includes('@startuml') ||
       sourceCode.includes('classDiagram') ||
-      /^\s*class\s+\w+\s*\{[^}]*<</.test(sourceCode)   // PlantUML stereotypes inside class body
+      sourceCode.includes('sequenceDiagram') ||
+      /^\s*actor\s+\w/m.test(sourceCode) ||
+      /^\s*participant\s+/m.test(sourceCode) ||
+      /^\s*usecase\s+/im.test(sourceCode) ||
+      /(?:^|\n)\s*\w+\s*->+\s*\w+\s*:/m.test(sourceCode) ||
+      /^\\s*class\\s+\\w+\\s*\\{[^}]*<</.test(sourceCode)
     );
     if (isDefinitivelyPlantUML) {
       return this.parsePlantUMLAST(sourceCode);
@@ -652,20 +657,34 @@ class CodeToUMLConverter {
   static parsePlantUMLAST(sourceCode) {
     const ast = { classes: [], imports: [] };
 
-    /**
-     * cleanCode — strip the "classDiagram" header so the parser doesn't stumble on it.
-     */
-    const cleanCode = sourceCode.replace(/classDiagram\s*/i, '').trim();
+    const cleanCode = sourceCode.replace(/@startuml[\s\S]*?\n/i, '')
+                                .replace(/@enduml.*/i, '')
+                                .replace(/classDiagram\s*/i, '')
+                                .trim();
 
+    // ── Detect diagram type from keywords ────────────────────
+    const isSequence = /^\s*(participant|actor|->|-->|->>)/m.test(cleanCode);
+    const isUseCase  = /^\s*(actor\s+\w|usecase\s+|\([\w\s]+\))/m.test(cleanCode) &&
+                       !isSequence;
+
+    if (isSequence) {
+      return this.parsePlantUMLSequenceAST(cleanCode);
+    }
+
+    if (isUseCase) {
+      return this.parsePlantUMLUseCaseAST(cleanCode);
+    }
+
+    // ── Default: class diagram parser ─────────────────────────
     const classRegex = /class\s+(\w+)\s*(\{[^}]*\})?/g;
     let match;
 
     while ((match = classRegex.exec(cleanCode)) !== null) {
       const [, className, classBody] = match;
-
       ast.classes.push({
         name: className,
-        extends: null,       // Filled in by extractPlantUMLRelationships() below
+        elementType: 'class',
+        extends: null,
         implements: [],
         attributes: this.extractPlantUMLAttributes(classBody || ''),
         methods: this.extractPlantUMLMethods(classBody || ''),
@@ -673,8 +692,150 @@ class CodeToUMLConverter {
       });
     }
 
-    // Pass 2: resolve relationship arrows → update class extends/implements
     this.extractPlantUMLRelationships(cleanCode, ast.classes);
+    return ast;
+  }
+
+  /**
+   * parsePlantUMLUseCaseAST(sourceCode)
+   * Parses PlantUML use case diagram syntax:
+   *   actor Customer
+   *   usecase (Login)
+   *   Customer --> (Login)
+   */
+  static parsePlantUMLUseCaseAST(sourceCode) {
+    const ast = { classes: [], imports: [] };
+
+    // Parse actors — "actor Name" or "actor :Name:" or "actor Name as Alias"
+    const actorRegex = /^actor\s+"?([^"\n]+?)"?\s*(?:as\s+(\w+))?$/gm;
+    let match;
+    while ((match = actorRegex.exec(sourceCode)) !== null) {
+      const name  = match[2] || match[1].trim();
+      const label = match[1].trim();
+      ast.classes.push({
+        name: name,
+        label: label,
+        elementType: 'actor',
+        extends: null,
+        implements: [],
+        attributes: [],
+        methods: [],
+        isAbstract: false,
+        _rels: []
+      });
+    }
+
+    // Parse use cases — "(Use Case Name)" or "usecase (Name)" or "usecase Name"
+    const ucRegex = /(?:usecase\s+)?\(([^)]+)\)(?:\s+as\s+(\w+))?/g;
+    while ((match = ucRegex.exec(sourceCode)) !== null) {
+      const label = match[1].trim();
+      const name  = match[2] || label.replace(/\s+/g, '');
+      ast.classes.push({
+        name: name,
+        label: label,
+        elementType: 'usecase',
+        extends: null,
+        implements: [],
+        attributes: [],
+        methods: [],
+        isAbstract: false
+      });
+    }
+
+    // Parse relationships
+    const relRegex = /(\w+|\([^)]+\))\s*(-->|--|\.\.|\.>|<--)\s*(\w+|\([^)]+\))(?:\s*:\s*(.+))?/g;
+    while ((match = relRegex.exec(sourceCode)) !== null) {
+      const [, from, arrow, to, label] = match;
+      const fromName = from.replace(/[()]/g, '').trim().replace(/\s+/g, '');
+      const toName   = to.replace(/[()]/g, '').trim().replace(/\s+/g, '');
+
+      const fromEl = ast.classes.find(c => c.name === fromName || c.label === from.replace(/[()]/g,'').trim());
+      const toEl   = ast.classes.find(c => c.name === toName   || c.label === to.replace(/[()]/g,'').trim());
+
+      // Store relationship on target for later processing
+      if (fromEl && toEl) {
+        if (!fromEl._rels) fromEl._rels = [];
+        fromEl._rels.push({ targetName: toEl.name, arrow, label: label?.trim() || '' });
+      }
+    }
+
+    return ast;
+  }
+
+  /**
+   * parsePlantUMLSequenceAST(sourceCode)
+   * Parses PlantUML sequence diagram syntax:
+   *   participant "System" as S
+   *   actor Customer
+   *   Customer -> S : Login
+   */
+  static parsePlantUMLSequenceAST(sourceCode) {
+    const ast = { classes: [], imports: [], messages: [] };
+
+    // Parse explicit participant/actor declarations
+    // Handles: actor User, participant Browser, participant "Auth Server" as Auth
+    const declRegex = /^(participant|actor)\s+"?([^"\n]+?)"?\s*(?:as\s+(\w+))?$/gm;
+    let match;
+    const seen     = new Set();
+    const aliasMap = {};
+
+    while ((match = declRegex.exec(sourceCode)) !== null) {
+      const kind  = match[1].toLowerCase();
+      const label = match[2].trim();
+      const alias = match[3] || null;
+      const name  = alias || label.replace(/\s+/g, '');
+
+      if (alias) aliasMap[alias] = name;
+
+      if (!seen.has(name)) {
+        seen.add(name);
+        ast.classes.push({
+          name,
+          label,
+          elementType: kind === 'actor' ? 'actor' : 'lifeline',
+          extends: null,
+          implements: [],
+          attributes: [],
+          methods: [],
+          isAbstract: false,
+          _rels: []
+        });
+      }
+    }
+
+    // Parse message lines — also picks up undeclared participants
+    const msgRegex = /^(\w+)\s*(->>?|-->>?|->x)\s*(\w+)\s*(?::\s*(.+))?$/gm;
+
+    while ((match = msgRegex.exec(sourceCode)) !== null) {
+      const [, fromRaw, arrow, toRaw, label] = match;
+      const from     = aliasMap[fromRaw] || fromRaw;
+      const to       = aliasMap[toRaw]   || toRaw;
+      const msgLabel = (label || '').trim();
+
+      // Register implicit participants
+      for (const [name, raw] of [[from, fromRaw], [to, toRaw]]) {
+        if (!seen.has(name)) {
+          seen.add(name);
+          ast.classes.push({
+            name, label: raw,
+            elementType: 'lifeline',
+            extends: null, implements: [],
+            attributes: [], methods: [],
+            isAbstract: false, _rels: []
+          });
+        }
+      }
+
+      // Store message as a _rel on the source participant
+      const fromEl = ast.classes.find(c => c.name === from);
+      if (fromEl) {
+        if (!fromEl._rels) fromEl._rels = [];
+        const connType = arrow.startsWith('--') ? 'return' : 'message';
+        fromEl._rels.push({ targetName: to, arrow, connType, label: msgLabel });
+      }
+
+      ast.messages.push({ from, to, arrow, label: msgLabel });
+    }
 
     return ast;
   }
@@ -805,6 +966,37 @@ class CodeToUMLConverter {
     const relationships = [];
 
     classes.forEach((sourceClass) => {
+
+      // ── PlantUML use case / sequence _rels (pre-parsed by PlantUML parsers) ──
+      // Only process _rels if this is a PlantUML element (has elementType set)
+      if (sourceClass.elementType && sourceClass.elementType !== 'class' && sourceClass.elementType !== 'abstract') {
+        // Process any stored _rels (messages, associations)
+        if (sourceClass._rels?.length > 0) {
+        sourceClass._rels.forEach(rel => {
+          const targetClass = classes.find(c => c.name === rel.targetName);
+          if (targetClass) {
+            // Use connType if set (sequence messages), otherwise infer from arrow
+            let relType = rel.connType || (
+              rel.arrow === '-->'  ? 'association'
+            : rel.arrow === '.>'  ? 'include'
+            : rel.arrow === '..'  ? 'extend'
+            : rel.arrow === '--'  ? 'association'
+            : rel.arrow === '..>' ? 'include'
+            : 'association'
+            );
+            relationships.push({
+              sourceId:  sourceClass.id,
+              targetId:  targetClass.id,
+              type:      relType,
+              label:     rel.label || '',
+              // Sequence messages carry the message text as their label
+              msgLabel:  rel.label || ''
+            });
+          }
+        });
+        }
+        return; // Skip code-based rules for PlantUML elements
+      }
 
       // 1. INHERITANCE
       if (sourceClass.extends) {
@@ -1020,14 +1212,31 @@ class CodeToUMLConverter {
     const elements = classes.map((cls, idx) => {
       const col = idx % COLS;
       const row = Math.floor(idx / COLS);
+
+      // Use elementType if set (actor/usecase/lifeline from PlantUML parsers),
+      // otherwise fall back to abstract/class based on isAbstract flag.
+      const resolvedType = cls.elementType && cls.elementType !== 'class'
+        ? cls.elementType
+        : (cls.isAbstract ? 'abstract' : 'class');
+
+      // Actors and lifelines need taller boxes to fit the stickman drawing
+      const defaultWidth  = resolvedType === 'actor'    ? 100
+                          : resolvedType === 'lifeline' ? 150
+                          : resolvedType === 'usecase'  ? 180
+                          : 200;
+      const defaultHeight = resolvedType === 'actor'    ? 110
+                          : resolvedType === 'lifeline' ? 100
+                          : resolvedType === 'usecase'  ? 80
+                          : this.calculateHeight(cls);
+
       return {
         id: cls.id,
-        type: cls.isAbstract ? 'abstract' : 'class',
-        name: cls.name,
-        x: START_X + col * COL_GAP, // FIX: grid x instead of simple 300*idx
-        y: START_Y + row * ROW_GAP, // FIX: grid y instead of constant 100
-        width: 200,
-        height: this.calculateHeight(cls), // Dynamic height based on member counts
+        type: resolvedType,
+        name: cls.label || cls.name,
+        x: START_X + col * COL_GAP,
+        y: START_Y + row * ROW_GAP,
+        width:  defaultWidth,
+        height: defaultHeight,
         attributes: cls.attributes || [],
         methods: cls.methods || [],
         stereotype: cls.isAbstract ? 'abstract' : ''
@@ -1054,17 +1263,18 @@ class CodeToUMLConverter {
 
       connections.push({
         id: `conn_${Date.now()}_${Math.random()}`,
-        from: rel.sourceId,   // Canvas reads 'from', not 'sourceId'
-        to: rel.targetId,     // Canvas reads 'to', not 'targetId'
+        from: rel.sourceId,
+        to:   rel.targetId,
         type: rel.type,
-        label: rel.label || '',
+        // Use msgLabel for sequence messages so the arrow shows the action text
+        label: rel.msgLabel || rel.label || '',
         fromMultiplicity: (rel.type === 'aggregation' || rel.type === 'composition') ? '1' : '',
         toMultiplicity: rel.multiplicity || (
           rel.type === 'aggregation' ? '0..*' :
           rel.type === 'composition' ? '1' : ''
         ),
         fromRole: '',
-        toRole: ''
+        toRole:   ''
       });
     });
 

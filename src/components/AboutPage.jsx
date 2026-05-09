@@ -1,25 +1,20 @@
 /**
- * AboutPage.jsx — About Us & FAQ slide-in panel
- * Changes applied:
- *   - Accent colors changed to #9c9b7f (primary) and #d9dccc (light)
- *   - Em-dashes removed from all step descriptions and hero text
- *   - Navbar logo: CodeSynch flame SVG (from brand image) instead of Sparkles icon
- *   - Advisers / Dept. Head block removed from Team section
- *   - Academic Context section removed entirely
+ * AboutPage.jsx — About Us & FAQ full page
+ * Full-page view with smooth transitions (no slide-in panel)
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import {
-  X, ChevronDown, ChevronUp,
+  ChevronDown, ChevronUp,
   BookOpen, Cpu, RefreshCw, Code2, Shield,
   Layers, Zap,
 } from 'lucide-react';
 
-// ─── Brand accent colors ──────────────────────────────────────────────────────
+// Brand accent colors
 const A1 = '#9c9b7f';   // primary accent (warm olive)
 const A2 = '#d9dccc';   // light accent (pale sage)
 
-// ─── DATA ─────────────────────────────────────────────────────────────────────
+// DATA
 
 const FEATURES = [
   { icon: <RefreshCw size={18} />, title: 'Round-Trip Engineering',    accent: A1,      desc: 'Bidirectional sync keeps UML diagrams and code consistent throughout the entire development lifecycle. Edit code and the diagram updates automatically.' },
@@ -53,7 +48,7 @@ const FAQ_ITEMS = [
   { q: 'How does CodeSynch align with the UN Sustainable Development Goals?', a: 'SDG 4 (Quality Education): feedback-oriented learning environment for students observing UML designs alongside generated code. SDG 9 (Industry, Innovation and Infrastructure): open, non-proprietary prototype with reproducible evaluation metrics. SDG 12 (Responsible Consumption and Production): reduces redundant manual coding steps and resource waste.' },
 ];
 
-// ─── CodeSynch logo using the actual brand image ─────────────────────────────
+// CodeSynch logo using the actual brand image
 const CodeSynchLogo = ({ size = 28 }) => (
   <img
     src="/codesynch.jpg"
@@ -62,7 +57,7 @@ const CodeSynchLogo = ({ size = 28 }) => (
   />
 );
 
-// ─── SUB-COMPONENTS ───────────────────────────────────────────────────────────
+// SUB-COMPONENTS
 
 const SectionHeading = ({ icon, label }) => (
   <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 16 }}>
@@ -137,77 +132,37 @@ const FaqItem = ({ item }) => {
   );
 };
 
-// ─── MAIN ────────────────────────────────────────────────────────────────────
+// MAIN - Full page component (no onClose, no slide-in)
 
-const AboutPage = ({ onClose }) => {
-  const [visible, setVisible] = useState(false);
-
-  useEffect(() => {
-    const t = setTimeout(() => setVisible(true), 12);
-    return () => clearTimeout(t);
-  }, []);
-
-  const handleClose = () => {
-    setVisible(false);
-    setTimeout(onClose, 300);
-  };
-
+const AboutPage = () => {
   return (
     <div
-      onClick={handleClose}
       style={{
-        position: 'fixed', inset: 0, zIndex: 100,
-        background: 'rgba(0,0,0,0.55)',
-        backdropFilter: 'blur(2px)',
-        display: 'flex',
+        width: '100%',
+        height: '100%',
+        background: '#1e1e1e',
+        display: 'flex', flexDirection: 'column',
+        overflow: 'hidden',
       }}
     >
-      <div
-        onClick={e => e.stopPropagation()}
-        style={{
-          marginLeft: 'auto',
-          width: 'min(780px, 100vw)',
-          height: '100%',
-          background: '#1e1e1e',
-          borderLeft: '1px solid #2d2d30',
-          boxShadow: '-8px 0 48px rgba(0,0,0,0.65)',
-          display: 'flex', flexDirection: 'column',
-          transform: visible ? 'translateX(0)' : 'translateX(100%)',
-          transition: 'transform 0.3s cubic-bezier(0.4,0,0.2,1)',
-          overflow: 'hidden',
-        }}
-      >
-        {/* NAV BAR */}
-        <div style={{
-          background: '#1a1a1a', borderBottom: '1px solid #2d2d30',
-          height: 48, padding: '0 20px',
-          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-          flexShrink: 0,
-        }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            {/* CodeSynch flame logo */}
-            <CodeSynchLogo size={28} />
-            <span style={{ color: A2, fontWeight: 700, fontSize: 14 }}>CodeSynch</span>
-            <span style={{ color: '#3e3e42', margin: '0 2px' }}>·</span>
-            <span style={{ color: '#6a6a6a', fontSize: 13 }}>About Us</span>
-          </div>
-          <button
-            onClick={handleClose}
-            title="Close"
-            style={{
-              background: 'none', border: 'none', cursor: 'pointer',
-              color: '#6a6a6a', padding: '6px 8px', borderRadius: 5,
-              display: 'flex', alignItems: 'center',
-            }}
-            onMouseEnter={e => { e.currentTarget.style.background = '#2d2d30'; e.currentTarget.style.color = A2; }}
-            onMouseLeave={e => { e.currentTarget.style.background = 'none'; e.currentTarget.style.color = '#6a6a6a'; }}
-          >
-            <X size={16} />
-          </button>
+      {/* Header Bar */}
+      <div style={{
+        background: '#1a1a1a', borderBottom: '1px solid #2d2d30',
+        height: 48, padding: '0 20px',
+        display: 'flex', alignItems: 'center',
+        flexShrink: 0,
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <CodeSynchLogo size={28} />
+          <span style={{ color: A2, fontWeight: 700, fontSize: 14 }}>CodeSynch</span>
+          <span style={{ color: '#3e3e42', margin: '0 2px' }}>·</span>
+          <span style={{ color: '#6a6a6a', fontSize: 13 }}>About Us</span>
         </div>
+      </div>
 
-        {/* BODY */}
-        <div style={{ flex: 1, overflowY: 'auto', padding: '28px 28px 44px' }}>
+      {/* BODY */}
+      <div style={{ flex: 1, overflowY: 'auto', padding: '28px 28px 44px' }}>
+        <div style={{ maxWidth: 900, margin: '0 auto' }}>
 
           {/* Hero */}
           <div style={{
@@ -281,31 +236,6 @@ const AboutPage = ({ onClose }) => {
             {FAQ_ITEMS.map((item, i) => <FaqItem key={i} item={item} />)}
           </section>
 
-        </div>
-
-        {/* FOOTER */}
-        <div style={{
-          background: '#1a1a1a', borderTop: '1px solid #2d2d30',
-          padding: '9px 20px',
-          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-          flexShrink: 0,
-        }}>
-          <span style={{ color: '#444', fontSize: 11 }}>
-            © 2025 CodeSynch · UML to Code Generator &nbsp;·&nbsp; Powered by Model-Driven Engineering
-          </span>
-          <button
-            onClick={handleClose}
-            style={{
-              background: '#e8e0d0', color: '#1a1a1a',
-              border: 'none', borderRadius: 6,
-              padding: '5px 18px', fontSize: 12, fontWeight: 600,
-              cursor: 'pointer', transition: 'background 0.15s',
-            }}
-            onMouseEnter={e => e.currentTarget.style.background = '#f0e8d8'}
-            onMouseLeave={e => e.currentTarget.style.background = '#e8e0d0'}
-          >
-            Close
-          </button>
         </div>
       </div>
     </div>
