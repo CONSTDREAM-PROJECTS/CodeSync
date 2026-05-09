@@ -1,16 +1,18 @@
 FROM php:8.2-apache
 
-# Enable Apache mod_rewrite
-RUN a2enmod rewrite
+RUN a2enmod rewrite headers
 
-# Install PHP extensions needed for MySQL/PostgreSQL
 RUN docker-php-ext-install pdo pdo_mysql mysqli
 
-# Copy all PHP files to Apache's web root
 COPY . /var/www/html/
 
-# Set proper permissions
 RUN chown -R www-data:www-data /var/www/html/
 
-# Expose port 80
+RUN echo '<Directory /var/www/html>\n\
+    Options Indexes FollowSymLinks\n\
+    AllowOverride All\n\
+    Require all granted\n\
+</Directory>' > /etc/apache2/conf-available/custom.conf \
+    && a2enconf custom
+
 EXPOSE 80
