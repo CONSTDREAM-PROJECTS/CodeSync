@@ -10,13 +10,21 @@
 //   when the JS side stopped trimming after our bug fixes.
 //
 // BUG 8 FIX: null guard on json_decode result.
+//
+// BUG 10 FIX: OPTIONS preflight request is now handled correctly
+//   so CORS headers are sent before any method check.
 // ============================================================
-
 require_once __DIR__ . '/cors.php';
 require_once __DIR__ . '/database.php';
 require_once __DIR__ . '/jwt.php';
 
 setCorsHeaders();
+
+// BUG 10 FIX: Handle OPTIONS preflight request
+if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
+    http_response_code(200);
+    exit;
+}
 
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
     http_response_code(405);
@@ -75,7 +83,6 @@ $payload = [
     'iat'   => time(),
     'exp'   => time() + (7 * 24 * 60 * 60),
 ];
-
 $token = jwtEncode($payload);
 
 echo json_encode([
