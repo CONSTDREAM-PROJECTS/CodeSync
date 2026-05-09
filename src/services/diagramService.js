@@ -35,8 +35,8 @@ export const TOKEN_KEY = 'codesynch_token';
 // React app and PHP API are on the same Hostinger domain.
 const API_BASE_URL =
   process.env.NODE_ENV === 'production'
-    ? 'https://admin.codesynch.tech/api'
-    : 'https://admin.codesynch.tech/api';
+    ? 'https://api.codesynch.tech/api'
+    : 'https://api.codesynch.tech/api';
 
 // ─────────────────────────────────────────────────────────────
 // Internal helpers
