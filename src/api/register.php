@@ -21,13 +21,21 @@
 //
 // BUG 9 FIX: Content-Type header is set by setCorsHeaders() which
 //   is always called first, ensuring proper JSON content-type.
+//
+// BUG 10 FIX: OPTIONS preflight request is now handled correctly
+//   so CORS headers are sent before any method check.
 // ============================================================
-
 require_once __DIR__ . '/cors.php';
 require_once __DIR__ . '/database.php';
-require_once __DIR__ . '/jwt.php'; // BUG 6 FIX: was missing
+require_once __DIR__ . '/jwt.php';
 
 setCorsHeaders();
+
+// BUG 10 FIX: Handle OPTIONS preflight request
+if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
+    http_response_code(200);
+    exit;
+}
 
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
     http_response_code(405);
