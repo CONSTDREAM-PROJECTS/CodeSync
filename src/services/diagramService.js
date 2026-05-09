@@ -21,18 +21,19 @@
  *   logged a warning — it never told UMLEditor to show the login modal.
  *   FIX: _apiRequest() now checks for 401 responses and dispatches a
  *   custom 'codesynch:session-expired' event that UMLEditor can listen to.
+ *
+ * BUG 11 — API URLs used folder-style paths (/diagrams/save) but PHP
+ *   files are named diagrams_save.php, diagrams_load.php, etc.
+ *   FIX: Updated all URLs to match actual PHP filenames.
  * ============================================================
  */
 
-// TOKEN_KEY — defined locally to avoid a circular import with LoginModal.jsx.
-// Must match the TOKEN_KEY exported from LoginModal.jsx exactly.
 export const TOKEN_KEY = 'codesynch_token';
 
 // ─────────────────────────────────────────────────────────────
 // Configuration — keep in sync with LoginModal.jsx API_BASE_URL
 // ─────────────────────────────────────────────────────────────
 
-// React app and PHP API are on the same Hostinger domain.
 const API_BASE_URL =
   process.env.NODE_ENV === 'production'
     ? 'https://api.codesynch.tech'
@@ -49,18 +50,11 @@ const _authHeaders = () => ({
   'Authorization': `Bearer ${_getToken()}`,
 });
 
-/**
- * _apiRequest(url, options)
- * BUG FIX: Centralised fetch wrapper that detects 401 responses and
- * fires a 'codesynch:session-expired' event so UMLEditor can show
- * the login modal instead of silently failing.
- */
 const _apiRequest = async (url, options = {}) => {
   const res  = await fetch(url, options);
   const json = await res.json().catch(() => ({}));
 
   if (res.status === 401) {
-    // Token expired or invalid — clear it and signal UMLEditor
     localStorage.removeItem(TOKEN_KEY);
     window.dispatchEvent(new CustomEvent('codesynch:session-expired'));
     throw new Error(json.error || 'Session expired. Please log in again.');
@@ -89,13 +83,13 @@ class DiagramService {
 
   /**
    * saveDiagram(user, diagramId, diagramData)
-   * POST /api/diagrams/save
+   * POST /diagrams_save.php
    */
   static async saveDiagram(user, diagramId, diagramData) {
     if (!user || !_getToken()) return { success: false, id: null, error: 'Not logged in.' };
 
     try {
-      const json = await _apiRequest(`${API_BASE_URL}/diagrams/save`, {
+      const json = await _apiRequest(`${API_BASE_URL}/diagrams_save.php`, {
         method:  'POST',
         headers: _authHeaders(),
         body: JSON.stringify({
@@ -116,14 +110,14 @@ class DiagramService {
 
   /**
    * loadDiagram(user, diagramId)
-   * GET /api/diagrams/load?diagramId=xxx
+   * GET /diagrams_load.php?diagramId=xxx
    */
   static async loadDiagram(user, diagramId) {
     if (!user || !_getToken()) return { success: false, data: null, error: 'Not logged in.' };
 
     try {
       const json = await _apiRequest(
-        `${API_BASE_URL}/diagrams/load?diagramId=${encodeURIComponent(diagramId)}`,
+        `${API_BASE_URL}/diagrams_load.php?diagramId=${encodeURIComponent(diagramId)}`,
         { method: 'GET', headers: _authHeaders() }
       );
       return { success: true, data: json.data, error: null };
@@ -135,13 +129,13 @@ class DiagramService {
 
   /**
    * listDiagrams(user)
-   * GET /api/diagrams/list
+   * GET /diagrams_list.php
    */
   static async listDiagrams(user) {
     if (!user || !_getToken()) return { success: false, diagrams: [], error: 'Not logged in.' };
 
     try {
-      const json = await _apiRequest(`${API_BASE_URL}/diagrams/list`, {
+      const json = await _apiRequest(`${API_BASE_URL}/diagrams_list.php`, {
         method: 'GET', headers: _authHeaders(),
       });
       return { success: true, diagrams: json.diagrams || [], error: null };
@@ -153,13 +147,13 @@ class DiagramService {
 
   /**
    * deleteDiagram(user, diagramId)
-   * DELETE /api/diagrams/delete
+   * DELETE /diagrams_delete.php
    */
   static async deleteDiagram(user, diagramId) {
     if (!user || !_getToken()) return { success: false, error: 'Not logged in.' };
 
     try {
-      await _apiRequest(`${API_BASE_URL}/diagrams/delete`, {
+      await _apiRequest(`${API_BASE_URL}/diagrams_delete.php`, {
         method:  'DELETE',
         headers: _authHeaders(),
         body:    JSON.stringify({ diagramId }),
