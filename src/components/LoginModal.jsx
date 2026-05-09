@@ -17,8 +17,6 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { Loader, Github, Chrome, Check, X } from 'lucide-react';
-// TOKEN_KEY lives in diagramService — import first, then re-export below
-// so UMLEditor can do: import { TOKEN_KEY } from './LoginModal'
 import { TOKEN_KEY } from '../services/diagramService';
 export { TOKEN_KEY };
 
@@ -39,9 +37,6 @@ const getPasswordErrors = (password) => PASSWORD_RULES.filter(r => !r.test(passw
 // Configuration
 // ─────────────────────────────────────────────────────────────
 
-// API_BASE_URL — React app and PHP API are on the same Hostinger domain.
-// In production:  https://admin.codesynch.tech/api
-// In local dev:   http://localhost/api  (adjust if your local path differs)
 const API_BASE_URL =
   process.env.NODE_ENV === 'production'
     ? 'https://api.codesynch.tech'
@@ -95,17 +90,13 @@ const LoginModal = ({ onClose, onLoginSuccess }) => {
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Listen for OAuth popup postMessage ────────────────────
-  // OAuthCallback.jsx sends window.opener.postMessage() after
-  // the PHP callback redirects back with the token.
   useEffect(() => {
     const handleMessage = (event) => {
-      // Security: only accept messages from our own origin
       if (event.origin !== window.location.origin) return;
 
       const { type, token, user, error: oauthError } = event.data || {};
 
       if (type === 'OAUTH_SUCCESS' && token) {
-        // Build user object — uid comes from JWT payload
         try {
           const parts   = token.split('.');
           const payload = JSON.parse(atob(
@@ -150,7 +141,7 @@ const LoginModal = ({ onClose, onLoginSuccess }) => {
 
   // ── Shared POST helper ────────────────────────────────────
   const _post = async (endpoint, body) => {
-    const res  = await fetch(`${API_BASE_URL}/${endpoint}`, {
+    const res = await fetch(`${API_BASE_URL}/${endpoint}.php`, {
       method:  'POST',
       headers: { 'Content-Type': 'application/json' },
       body:    JSON.stringify(body),
@@ -186,7 +177,6 @@ const LoginModal = ({ onClose, onLoginSuccess }) => {
     setError('');
     if (!email.trim()) { setError('Please enter your email address.'); return; }
 
-    // Gmail-only restriction — check before hitting the server
     if (!email.trim().toLowerCase().endsWith('@gmail.com')) {
       setError('Only Gmail addresses (@gmail.com) are accepted. Please use your Google email.');
       return;
@@ -194,7 +184,6 @@ const LoginModal = ({ onClose, onLoginSuccess }) => {
 
     if (!password) { setError('Please enter your password.'); return; }
 
-    // Enforce password rules only on registration
     if (mode === 'register' && !validatePassword(password)) {
       setShowRules(true);
       setError('Password does not meet the requirements below.');
@@ -205,7 +194,6 @@ const LoginModal = ({ onClose, onLoginSuccess }) => {
     try {
       mode === 'login' ? await handleLogin() : await handleRegister();
     } catch (err) {
-      // "Failed to fetch" means the API server is unreachable — give a clear message
       if (err.message === 'Failed to fetch' || err.message.includes('NetworkError') || err.message.includes('fetch')) {
         setError('Cannot reach the server. Please check your internet connection or try again in a moment.');
       } else {
@@ -221,13 +209,12 @@ const LoginModal = ({ onClose, onLoginSuccess }) => {
     setError('');
     setOauthLoading(provider);
 
-    // Open the PHP OAuth endpoint in a small centred popup
     const width  = 520;
     const height = 620;
     const left   = Math.round(window.screenX + (window.outerWidth  - width)  / 2);
     const top    = Math.round(window.screenY + (window.outerHeight - height) / 2);
 
-    const oauthUrl = `${API_BASE_URL}/oauth/${provider}`;
+    const oauthUrl = `${API_BASE_URL}/oauth/${provider}.php`;
 
     popupRef.current = window.open(
       oauthUrl,
