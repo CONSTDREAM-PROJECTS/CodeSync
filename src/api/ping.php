@@ -1,7 +1,7 @@
 <?php
 // ============================================================
 // ping.php — GET /api/ping  (diagnostic)
-// Visit: https://admin.codesynch.tech/api/ping
+// Visit: https://api.codesynch.tech/api/ping
 // ============================================================
 require_once __DIR__ . '/cors.php';
 require_once __DIR__ . '/database.php';
