@@ -45,7 +45,7 @@ const getPasswordErrors = (password) => PASSWORD_RULES.filter(r => !r.test(passw
 const API_BASE_URL =
   process.env.NODE_ENV === 'production'
     ? 'https://admin.codesynch.tech/api'
-    : 'http://localhost/api';
+    : 'https://admin.codesynch.tech/api';
 
 // ─────────────────────────────────────────────────────────────
 // Session restore helper (used by UMLEditor on mount)
