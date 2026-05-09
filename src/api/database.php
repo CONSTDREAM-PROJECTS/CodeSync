@@ -12,10 +12,10 @@
 // BUG 7 FIX: Was still pointing to InfinityFree credentials.
 // Updated for Hostinger. DB_HOST is almost always 'localhost' on
 // Hostinger shared hosting (same-server connection).
-define('DB_HOST', 'localhost');                  // Hostinger: usually localhost
-define('DB_NAME', 'u123456789_codesynch');      // ← your Hostinger DB name
-define('DB_USER', 'u123456789_codesynch');      // ← your Hostinger DB user
-define('DB_PASS', 'YourStrongPasswordHere');    // ← your Hostinger DB password
+define('DB_HOST', 'codesynch-codesyncdatabase-wls0l1');                  // Hostinger: usually localhost
+define('DB_NAME', 'Codesynch_db');      // ← your Hostinger DB name
+define('DB_USER', 'codesynch_user');      // ← your Hostinger DB user
+define('DB_PASS', '#Code_no7_#');    // ← your Hostinger DB password
 
 // JWT signing secret — must be long and random.
 // IMPORTANT: Changing this after users have registered will
