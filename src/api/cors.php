@@ -3,7 +3,7 @@
 // cors.php — CORS Headers
 // ============================================================
 $ALLOWED_ORIGINS = [
-    'https://admin.codesynch.tech',
+    'https://api.codesynch.tech',
     'https://codesynch.tech',
     'http://localhost:3000',
     'http://localhost:5173',
