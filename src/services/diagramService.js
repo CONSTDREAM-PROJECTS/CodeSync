@@ -36,7 +36,7 @@ export const TOKEN_KEY = 'codesynch_token';
 const API_BASE_URL =
   process.env.NODE_ENV === 'production'
     ? 'https://admin.codesynch.tech/api'
-    : 'http://localhost/api';
+    : 'https://admin.codesynch.tech/api';
 
 // ─────────────────────────────────────────────────────────────
 // Internal helpers
