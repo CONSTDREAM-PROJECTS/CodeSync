@@ -61,7 +61,7 @@ if (!str_ends_with($email, '@gmail.com')) {
 $pdo = getPDO();
 
 // Fetch user by email
-$stmt = $pdo->prepare('SELECT id, email, password_hash FROM users WHERE email = ?');
+$stmt = $pdo->prepare('SELECT id, email, username, password_hash FROM users WHERE email = ?');
 $stmt->execute([$email]);
 $user = $stmt->fetch();
 
@@ -78,17 +78,19 @@ if (!$user || !password_verify($password, $hashToCheck)) {
 
 // Issue JWT (expires in 7 days)
 $payload = [
-    'sub'   => $user['id'],
-    'email' => $user['email'],
-    'iat'   => time(),
-    'exp'   => time() + (7 * 24 * 60 * 60),
+    'sub'      => $user['id'],
+    'email'    => $user['email'],
+    'username' => $user['username'] ?? '',
+    'iat'      => time(),
+    'exp'      => time() + (7 * 24 * 60 * 60),
 ];
 $token = jwtEncode($payload);
 
 echo json_encode([
     'token' => $token,
     'user'  => [
-        'uid'   => (string) $user['id'],
-        'email' => $user['email'],
+        'uid'      => (string) $user['id'],
+        'email'    => $user['email'],
+        'username' => $user['username'] ?? '',
     ],
 ]);

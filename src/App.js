@@ -1,7 +1,7 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import UMLEditor from './components/UMLEditor';
-import { Menu, Github, Book, ArrowLeft } from 'lucide-react';
-import LoginModal from './components/LoginModal';
+import { Menu, Github, Book, ArrowLeft, LogOut, User } from 'lucide-react';
+import LoginModal, { restoreSession } from './components/LoginModal';
 import AboutPage from './components/AboutPage';
 import ContactPage from './components/ContactPage';
 import './App.css';
@@ -9,8 +9,15 @@ import './App.css';
 function App() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [showLogin, setShowLogin] = useState(false);
-  const [currentPage, setCurrentPage] = useState('home'); // 'home', 'about', 'contact'
+  const [currentUser, setCurrentUser] = useState(null);
+  const [currentPage, setCurrentPage] = useState('home');
   const [isTransitioning, setIsTransitioning] = useState(false);
+
+  // Restore logged-in session on page load
+  useEffect(() => {
+    const user = restoreSession();
+    if (user) setCurrentUser(user);
+  }, []);
 
   const navigateTo = (page) => {
     setIsTransitioning(true);
@@ -65,9 +72,30 @@ function App() {
             </button>
           )}
 
-          <button onClick={() => setShowLogin(true)} className="px-4 py-1.5 btn-primary text-sm font-medium">
-            Login
-          </button>
+          {currentUser ? (
+            <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 px-3 py-1.5 rounded bg-[#2d2d30] border border-[#3e3e42]">
+                <User size={14} className="text-[#9c9b7f]" />
+                <span className="text-sm text-[#d9dccc] font-medium">
+                  {(currentUser.username && currentUser.username.trim()) ? currentUser.username : currentUser.email.split('@')[0]}
+                </span>
+              </div>
+              <button
+                onClick={() => {
+                  localStorage.removeItem('codesynch_token');
+                  setCurrentUser(null);
+                }}
+                className="p-1.5 rounded hover:bg-[#3e3e42] text-gray-400 hover:text-white transition-colors"
+                title="Log out"
+              >
+                <LogOut size={15} />
+              </button>
+            </div>
+          ) : (
+            <button onClick={() => setShowLogin(true)} className="px-4 py-1.5 btn-primary text-sm font-medium">
+              Login
+            </button>
+          )}
 
           {currentPage === 'home' && (
             <button
@@ -132,7 +160,15 @@ function App() {
         </div>
       )}
 
-      {showLogin && <LoginModal onClose={() => setShowLogin(false)} />}
+      {showLogin && (
+        <LoginModal
+          onClose={() => setShowLogin(false)}
+          onLoginSuccess={(user) => {
+            setCurrentUser(user);
+            setShowLogin(false);
+          }}
+        />
+      )}
     </div>
   );
 }

@@ -62,7 +62,15 @@ export const restoreSession = () => {
       return null;
     }
 
-    return { uid: String(payload.sub), email: payload.email };
+    // If the token has no username it's a stale token from before
+    // usernames were added — clear it so the user logs in fresh
+    // and gets a token with the real username from the DB.
+    if (!payload.username || payload.username.trim() === '') {
+      localStorage.removeItem(TOKEN_KEY);
+      return null;
+    }
+
+    return { uid: String(payload.sub), email: payload.email, username: payload.username };
   } catch {
     localStorage.removeItem(TOKEN_KEY);
     return null;
@@ -75,6 +83,7 @@ export const restoreSession = () => {
 
 const LoginModal = ({ onClose, onLoginSuccess }) => {
   const [email,        setEmail]        = useState('');
+  const [username,     setUsername]     = useState('');
   const [password,     setPassword]     = useState('');
   const [isLoading,    setIsLoading]    = useState(false);
   const [oauthLoading, setOauthLoading] = useState('');
@@ -103,8 +112,9 @@ const LoginModal = ({ onClose, onLoginSuccess }) => {
             parts[1].replace(/-/g, '+').replace(/_/g, '/')
           ));
           const resolvedUser = {
-            uid:   String(payload.sub),
-            email: payload.email || user?.email || '',
+            uid:      String(payload.sub),
+            email:    payload.email || user?.email || '',
+            username: payload.username || user?.username || '',
           };
           localStorage.setItem(TOKEN_KEY, token);
           setOauthLoading('');
@@ -155,16 +165,44 @@ const LoginModal = ({ onClose, onLoginSuccess }) => {
   const handleLogin = async () => {
     const json = await _post('login', { email: email.trim(), password });
     localStorage.setItem(TOKEN_KEY, json.token);
-    onLoginSuccess?.(json.user);
+
+    // Decode username from JWT — single source of truth
+    try {
+      const parts   = json.token.split('.');
+      const payload = JSON.parse(atob(parts[1].replace(/-/g, '+').replace(/_/g, '/')));
+      const resolvedUser = {
+        uid:      String(payload.sub),
+        email:    payload.email    || json.user?.email    || '',
+        username: payload.username || json.user?.username || '',
+      };
+      onLoginSuccess?.(resolvedUser);
+    } catch {
+      onLoginSuccess?.(json.user); // fallback
+    }
+
     onClose();
   };
 
   // ── Email register ────────────────────────────────────────
   const handleRegister = async () => {
-    const json = await _post('register', { email: email.trim(), password });
+    const json = await _post('register', { email: email.trim(), username: username.trim(), password });
     if (json.token) {
       localStorage.setItem(TOKEN_KEY, json.token);
-      onLoginSuccess?.(json.user);
+
+      // Decode username from JWT — same as handleLogin
+      try {
+        const parts   = json.token.split('.');
+        const payload = JSON.parse(atob(parts[1].replace(/-/g, '+').replace(/_/g, '/')));
+        const resolvedUser = {
+          uid:      String(payload.sub),
+          email:    payload.email    || json.user?.email    || '',
+          username: payload.username || json.user?.username || '',
+        };
+        onLoginSuccess?.(resolvedUser);
+      } catch {
+        onLoginSuccess?.(json.user); // fallback
+      }
+
       onClose();
     } else {
       await handleLogin();
@@ -179,6 +217,21 @@ const LoginModal = ({ onClose, onLoginSuccess }) => {
 
     if (!email.trim().toLowerCase().endsWith('@gmail.com')) {
       setError('Only Gmail addresses (@gmail.com) are accepted. Please use your Google email.');
+      return;
+    }
+
+    if (mode === 'register' && !username.trim()) {
+      setError('Please enter a username.');
+      return;
+    }
+
+    if (mode === 'register' && username.trim().length < 3) {
+      setError('Username must be at least 3 characters.');
+      return;
+    }
+
+    if (mode === 'register' && !/[0-9_]/.test(username.trim())) {
+      setError('Username must contain at least one number or underscore');
       return;
     }
 
@@ -280,6 +333,26 @@ const LoginModal = ({ onClose, onLoginSuccess }) => {
               Only Gmail addresses are accepted.
             </p>
           )}
+
+          {/* Username — register only */}
+          {mode === 'register' && (
+            <input
+              type="text"
+              placeholder="Username"
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
+              className="login-input"
+              disabled={anyLoading}
+              maxLength={30}
+              autoComplete="username"
+            />
+          )}
+          {mode === 'register' && (
+            <p className="text-xs text-gray-500 -mt-1 px-1">
+              Must include at least one number or underscore.
+            </p>
+          )}
+
           <input type="password" placeholder="Password"
             value={password} onChange={(e) => {
               setPassword(e.target.value);

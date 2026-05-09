@@ -52,13 +52,38 @@ if (!is_array($body)) {
 }
 
 $email    = trim($body['email']    ?? '');
+$username = strtolower(trim($body['username'] ?? ''));
 // BUG 2 FIX: Do NOT trim the password — spaces are valid characters.
-// The JS side also no longer trims, so both sides are consistent.
 $password = $body['password'] ?? '';
 
 if ($email === '' || $password === '') {
     http_response_code(400);
     echo json_encode(['error' => 'Email and password are required.']);
+    exit;
+}
+
+if ($username === '') {
+    http_response_code(400);
+    echo json_encode(['error' => 'Username is required.']);
+    exit;
+}
+
+if (strlen($username) < 3) {
+    http_response_code(400);
+    echo json_encode(['error' => 'Username must be at least 3 characters.']);
+    exit;
+}
+
+if (!preg_match('/^[a-zA-Z0-9_]+$/', $username)) {
+    http_response_code(400);
+    echo json_encode(['error' => 'Username can only contain letters, numbers, and underscores.']);
+    exit;
+}
+
+// Require at least one number or underscore so usernames stay unique
+if (!preg_match('/[0-9_]/', $username)) {
+    http_response_code(400);
+    echo json_encode(['error' => 'Username must contain at least one number or underscore.']);
     exit;
 }
 
@@ -104,19 +129,29 @@ if ($stmt->fetch()) {
     exit;
 }
 
+// Check if username already taken (case-insensitive — usernames are stored lowercase)
+$stmt = $pdo->prepare('SELECT id FROM users WHERE LOWER(username) = ?');
+$stmt->execute([$username]);
+if ($stmt->fetch()) {
+    http_response_code(409);
+    echo json_encode(['error' => 'That username is already taken. Please choose another.']);
+    exit;
+}
+
 // Hash and insert
 $hash = password_hash($password, PASSWORD_BCRYPT);
-$stmt = $pdo->prepare('INSERT INTO users (email, password_hash, created_at) VALUES (?, ?, NOW())');
-$stmt->execute([$email, $hash]);
+$stmt = $pdo->prepare('INSERT INTO users (email, username, password_hash, created_at) VALUES (?, ?, ?, NOW())');
+$stmt->execute([$email, $username, $hash]);
 $newUserId = (int) $pdo->lastInsertId();
 
 // BUG 1 FIX: Issue JWT immediately so the client logs in without
 // needing a second /api/login call after registration.
 $payload = [
-    'sub'   => $newUserId,
-    'email' => $email,
-    'iat'   => time(),
-    'exp'   => time() + (7 * 24 * 60 * 60),
+    'sub'      => $newUserId,
+    'email'    => $email,
+    'username' => $username,
+    'iat'      => time(),
+    'exp'      => time() + (7 * 24 * 60 * 60),
 ];
 $token = jwtEncode($payload);
 
@@ -125,7 +160,8 @@ echo json_encode([
     'message' => 'Account created successfully.',
     'token'   => $token,
     'user'    => [
-        'uid'   => (string) $newUserId,
-        'email' => $email,
+        'uid'      => (string) $newUserId,
+        'email'    => $email,
+        'username' => $username,
     ],
 ]);
