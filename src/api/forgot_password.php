@@ -59,6 +59,11 @@ if ($user) {
 
     $resetUrl = getenv('APP_URL') . '/reset-password?token=' . $token;
 
+    // Debug: log env var values to check if they're being read
+    error_log('MAIL_USERNAME: ' . getenv('MAIL_USERNAME'));
+    error_log('MAIL_PASSWORD length: ' . strlen(getenv('MAIL_PASSWORD')));
+    error_log('MAIL_FROM: ' . getenv('MAIL_FROM'));
+
     $mail = new PHPMailer(true);
     try {
         $mail->isSMTP();
