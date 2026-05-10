@@ -1,3 +1,0 @@
-git add composer.lock
-git commit -m "Add composer.lock"
-git push
