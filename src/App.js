@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import UMLEditor from './components/UMLEditor';
 import { Menu, Github, Book, ArrowLeft, LogOut, User } from 'lucide-react';
-import LoginModal, { restoreSession } from './components/LoginModal';
+import LoginModal, { restoreSession, clearSession } from './components/LoginModal';
 import AboutPage from './components/AboutPage';
 import ContactPage from './components/ContactPage';
 import './App.css';
@@ -31,6 +31,25 @@ function App() {
 
   const goBack = () => {
     navigateTo('home');
+  };
+
+  // FIX 1: Centralized logout handler — calls clearSession() so the token
+  // is actually removed from localStorage. The old inline onClick was calling
+  // localStorage.removeItem('codesynch_token') directly, which hardcodes the
+  // key and bypasses the TOKEN_KEY constant. If the key ever changes in
+  // diagramService.js, the logout would silently stop working.
+  // Also opens the login modal, which covers the session-expired case from
+  // UMLEditor (FIX 3 below).
+  const handleLogout = () => {
+    clearSession();
+    setCurrentUser(null);
+    setShowLogin(true);
+  };
+
+  // FIX 2: Close the login modal after a successful login.
+  const handleLoginSuccess = (user) => {
+    setCurrentUser(user);
+    setShowLogin(false);
   };
 
   return (
@@ -80,11 +99,9 @@ function App() {
                   {currentUser.username || currentUser.email.split('@')[0]}
                 </span>
               </div>
+              {/* FIX 1: Use centralized handleLogout instead of inline localStorage call */}
               <button
-                onClick={() => {
-                  localStorage.removeItem('codesynch_token');
-                  setCurrentUser(null);
-                }}
+                onClick={handleLogout}
                 className="p-1.5 rounded hover:bg-[#3e3e42] text-gray-400 hover:text-white transition-colors"
                 title="Log out"
               >
@@ -117,7 +134,18 @@ function App() {
               : 'opacity-100 transform translate-y-0'
           }`}
         >
-          {currentPage === 'home' && <UMLEditor />}
+          {/* FIX 3: Pass currentUser, onLoginSuccess, and onLogout to UMLEditor.
+              Previously UMLEditor was rendered with no props at all, which meant:
+              - autoSave never fired (currentUser was always undefined)
+              - the session-expired event had no onLogout to call
+              - onLoginSuccess was never wired up */}
+          {currentPage === 'home' && (
+            <UMLEditor
+              currentUser={currentUser}
+              onLoginSuccess={handleLoginSuccess}
+              onLogout={handleLogout}
+            />
+          )}
           {currentPage === 'about' && <AboutPage />}
           {currentPage === 'contact' && <ContactPage />}
         </div>
@@ -163,11 +191,7 @@ function App() {
       {showLogin && (
         <LoginModal
           onClose={() => setShowLogin(false)}
-          onLoginSuccess={(user) => {
-            console.log('[App] onLoginSuccess called with:', user);
-            setCurrentUser(user);
-            console.log('[App] setCurrentUser called');
-          }}
+          onLoginSuccess={handleLoginSuccess}
         />
       )}
     </div>
