@@ -4,53 +4,57 @@ import { Menu, Github, Book, ArrowLeft, LogOut, User } from 'lucide-react';
 import LoginModal, { restoreSession, clearSession } from './components/LoginModal';
 import AboutPage from './components/AboutPage';
 import ContactPage from './components/ContactPage';
+import OAuthCallback from './components/OAuthCallback';
 import './App.css';
 
 function App() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [showLogin, setShowLogin] = useState(false);
   const [currentUser, setCurrentUser] = useState(null);
-  const [currentPage, setCurrentPage] = useState('home');
   const [isTransitioning, setIsTransitioning] = useState(false);
+
+  // Detect /oauth-callback path on initial load so the popup
+  // renders OAuthCallback instead of the full editor.
+  const [currentPage, setCurrentPage] = useState(() => {
+    if (window.location.pathname === '/oauth-callback') return 'oauth-callback';
+    return 'home';
+  });
 
   // Restore logged-in session on page load
   useEffect(() => {
+    if (currentPage === 'oauth-callback') return; // skip for popup
     const user = restoreSession();
     if (user) setCurrentUser(user);
-  }, []);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const navigateTo = (page) => {
     setIsTransitioning(true);
     setTimeout(() => {
       setCurrentPage(page);
-      setTimeout(() => {
-        setIsTransitioning(false);
-      }, 50);
+      setTimeout(() => setIsTransitioning(false), 50);
     }, 300);
   };
 
-  const goBack = () => {
-    navigateTo('home');
-  };
+  const goBack = () => navigateTo('home');
 
-  // FIX 1: Centralized logout handler — calls clearSession() so the token
-  // is actually removed from localStorage. The old inline onClick was calling
-  // localStorage.removeItem('codesynch_token') directly, which hardcodes the
-  // key and bypasses the TOKEN_KEY constant. If the key ever changes in
-  // diagramService.js, the logout would silently stop working.
-  // Also opens the login modal, which covers the session-expired case from
-  // UMLEditor (FIX 3 below).
+  // Centralized logout — uses clearSession() so TOKEN_KEY stays
+  // as the single source of truth from diagramService.js.
   const handleLogout = () => {
     clearSession();
     setCurrentUser(null);
     setShowLogin(true);
   };
 
-  // FIX 2: Close the login modal after a successful login.
   const handleLoginSuccess = (user) => {
     setCurrentUser(user);
     setShowLogin(false);
   };
+
+  // Render only the OAuth callback handler for the popup window —
+  // no nav, no footer, no editor.
+  if (currentPage === 'oauth-callback') {
+    return <OAuthCallback />;
+  }
 
   return (
     <div className="h-screen flex flex-col bg-[#1e1e1e]">
@@ -99,7 +103,6 @@ function App() {
                   {currentUser.username || currentUser.email.split('@')[0]}
                 </span>
               </div>
-              {/* FIX 1: Use centralized handleLogout instead of inline localStorage call */}
               <button
                 onClick={handleLogout}
                 className="p-1.5 rounded hover:bg-[#3e3e42] text-gray-400 hover:text-white transition-colors"
@@ -129,16 +132,11 @@ function App() {
       <main className="flex-1 overflow-hidden relative">
         <div
           className={`absolute inset-0 transition-all duration-300 ease-out ${
-            isTransitioning 
-              ? 'opacity-0 transform translate-y-4' 
+            isTransitioning
+              ? 'opacity-0 transform translate-y-4'
               : 'opacity-100 transform translate-y-0'
           }`}
         >
-          {/* FIX 3: Pass currentUser, onLoginSuccess, and onLogout to UMLEditor.
-              Previously UMLEditor was rendered with no props at all, which meant:
-              - autoSave never fired (currentUser was always undefined)
-              - the session-expired event had no onLogout to call
-              - onLoginSuccess was never wired up */}
           {currentPage === 'home' && (
             <UMLEditor
               currentUser={currentUser}
@@ -146,7 +144,7 @@ function App() {
               onLogout={handleLogout}
             />
           )}
-          {currentPage === 'about' && <AboutPage />}
+          {currentPage === 'about'   && <AboutPage />}
           {currentPage === 'contact' && <ContactPage />}
         </div>
       </main>
