@@ -19,7 +19,7 @@ COPY . /var/www/html/
 
 # Install PHP dependencies
 WORKDIR /var/www/html
-RUN if [ -f composer.json ]; then composer install --no-dev --optimize-autoloader; fi
+RUN if [ -f composer.json ]; then composer install --no-dev --optimize-autoloader --no-cache --ignore-platform-reqs; fi
 
 # Fix permissions
 RUN chown -R www-data:www-data /var/www/html/
