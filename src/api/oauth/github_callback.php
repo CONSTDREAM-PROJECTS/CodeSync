@@ -7,7 +7,7 @@ setCorsHeaders();
 $clientId     = getenv('GITHUB_CLIENT_ID');
 $clientSecret = getenv('GITHUB_CLIENT_SECRET');
 $redirectUri  = getenv('GITHUB_REDIRECT_URI');
-$appUrl       = getenv('APP_URL');
+$appUrl       = rtrim(getenv('APP_URL'), '/');
 
 // ── Step 1: Exchange code for access token ────────────────────
 $code = $_GET['code'] ?? '';
@@ -54,7 +54,6 @@ if (!$githubId) {
 $email = $githubUser['email'] ?? '';
 
 if (!$email) {
-    // Fetch from emails endpoint
     $emailResponse = file_get_contents('https://api.github.com/user/emails', false, stream_context_create([
         'http' => [
             'header' => "Authorization: Bearer {$accessToken}\r\nUser-Agent: CodeSynch",
@@ -62,10 +61,12 @@ if (!$email) {
     ]));
 
     $emails = json_decode($emailResponse, true);
-    foreach ($emails as $e) {
-        if ($e['primary'] && $e['verified']) {
-            $email = $e['email'];
-            break;
+    if (is_array($emails)) {
+        foreach ($emails as $e) {
+            if ($e['primary'] && $e['verified']) {
+                $email = $e['email'];
+                break;
+            }
         }
     }
 }
@@ -107,54 +108,40 @@ if (!$user) {
     }
 }
 
-// ── Step 5: Issue JWT and redirect back ──────────────────────
+// FIX 1: If the existing user has a blank username (e.g. created before OAuth
+// username generation was added), generate one now and persist it so
+// restoreSession() doesn't reject the JWT for having an empty username claim.
+if (empty($user['username'])) {
+    $fallback = strtolower(preg_replace('/[^a-zA-Z0-9_]/', '_', $name ?: 'user')) . '_' . rand(100, 999);
+    $pdo->prepare('UPDATE users SET username = ? WHERE id = ?')
+        ->execute([$fallback, $user['id']]);
+    $user['username'] = $fallback;
+}
+
+// ── Step 5: Issue JWT ─────────────────────────────────────────
 $payload = [
     'sub'      => $user['id'],
     'email'    => $user['email'],
-    'username' => $user['username'] ?? '',
+    'username' => $user['username'],
     'iat'      => time(),
     'exp'      => time() + (7 * 24 * 60 * 60),
 ];
 $token = jwtEncode($payload);
 
-echo "<!DOCTYPE html>
-<html>
-<head><title>Authenticating...</title></head>
-<body>
-<script>
-  if (window.opener) {
-    window.opener.postMessage({
-      type:  'OAUTH_SUCCESS',
-      token: " . json_encode($token) . ",
-      user:  " . json_encode(['uid' => (string)$user['id'], 'email' => $user['email'], 'username' => $user['username'] ?? '']) . "
-    }, " . json_encode($appUrl) . ");
-    window.close();
-  } else {
-    window.location.href = " . json_encode($appUrl) . ";
-  }
-</script>
-</body>
-</html>";
+// FIX 2: Redirect to a frontend page that does the postMessage instead of
+// doing it here. After a cross-domain redirect chain (this domain → GitHub →
+// this domain), some browsers sever window.opener for security, so
+// postMessage from the API domain never reaches the React app.
+// Redirecting to the frontend domain first restores the opener reference
+// and ensures the message fires from the same origin as the main app.
+$callbackUrl = $appUrl . '/oauth-callback?token=' . urlencode($token);
+header('Location: ' . $callbackUrl);
 exit;
 
 // ── Helper ───────────────────────────────────────────────────
 function redirectWithError($message) {
     global $appUrl;
-    echo "<!DOCTYPE html>
-<html>
-<body>
-<script>
-  if (window.opener) {
-    window.opener.postMessage({
-      type:  'OAUTH_ERROR',
-      error: " . json_encode($message) . "
-    }, " . json_encode($appUrl) . ");
-    window.close();
-  } else {
-    window.location.href = " . json_encode($appUrl) . ";
-  }
-</script>
-</body>
-</html>";
+    $errorUrl = $appUrl . '/oauth-callback?error=' . urlencode($message);
+    header('Location: ' . $errorUrl);
     exit;
 }
