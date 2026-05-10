@@ -64,12 +64,12 @@ if ($user) {
         $mail->isSMTP();
         $mail->Host       = 'smtp.gmail.com';
         $mail->SMTPAuth   = true;
-        $mail->Username   = getenv('codesynch.noreply@gmail.com');   // your Gmail address
-        $mail->Password   = getenv('eaba jsnf azsm gjby');   // your Gmail App Password
+        $mail->Username   = getenv('MAIL_USERNAME');
+        $mail->Password   = getenv('MAIL_PASSWORD');
         $mail->SMTPSecure = PHPMailer::ENCRYPTION_STARTTLS;
         $mail->Port       = 587;
 
-        $mail->setFrom(getenv('GMAIL_USER'), 'CodeSynch');
+        $mail->setFrom(getenv('MAIL_FROM'), getenv('MAIL_FROM_NAME'));
         $mail->addAddress($email);
 
         $mail->Subject = 'CodeSynch — Password Reset Request';
