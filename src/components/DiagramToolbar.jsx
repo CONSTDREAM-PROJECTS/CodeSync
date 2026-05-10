@@ -104,8 +104,8 @@ const DiagramToolbar = ({
   // "Code to Diagram" import — supported for all 3 diagram types
   const supportsCodeImport = true;
 
-  // Language selector — only class diagrams produce language-specific code
-  const supportsLanguageSelect = selectedDiagram === 'class';
+  // Language selector — shown for all diagram types
+  const supportsLanguageSelect = true;
 
   /**
    * generateButtonLabel / generateButtonTitle

@@ -202,8 +202,9 @@ class ValidationService {
       .forEach(token => {
         const { sourceClass, targetClass, sourceId, targetId } = token.attributes;
 
-        // Check source exists
-        if (!symbolTable.has(sourceClass) && !sourceClass) {
+        // Check source exists — fires only when the endpoint name is completely
+        // absent (the connection has no `from` element at all).
+        if (!sourceClass) {
           errors.push(this._issue(
             SEVERITY.ERROR,
             'DANGLING_RELATIONSHIP_SOURCE',
@@ -214,8 +215,8 @@ class ValidationService {
           ));
         }
 
-        // Check target exists
-        if (!symbolTable.has(targetClass) && !targetClass) {
+        // Check target exists — same guard: fires only when targetClass is absent.
+        if (!targetClass) {
           errors.push(this._issue(
             SEVERITY.ERROR,
             'DANGLING_RELATIONSHIP_TARGET',
@@ -226,7 +227,10 @@ class ValidationService {
           ));
         }
 
-        // Check that referenced class names actually exist in the symbol table
+        // Check that referenced names actually exist in the symbol table.
+        // After the TokenizationService fix, actors and use cases are
+        // registered in the symbol table alongside class definitions, so
+        // this check now works correctly for all diagram types.
         if (sourceClass && !symbolTable.has(sourceClass)) {
           errors.push(this._issue(
             SEVERITY.ERROR,
@@ -383,31 +387,55 @@ class ValidationService {
         });
       });
 
-    // ── Check 4: Use Case — every use case linked to an actor
+    // ── Check 4: Use Case — every use case reachable from at least one actor
+    // BUG FIX: Previously only direct actor→use case associations were considered.
+    // Use cases connected only via <<include>> or <<extend>> arrows (like
+    // "Download docs", "Preview doc", "Manage folders", "Add company") were
+    // falsely flagged as unconnected because the check only looked one hop.
+    // Fix: a use case is considered reachable if there is a transitive path from
+    // any actor through association / include / extend edges. We do a BFS/DFS
+    // from all actor nodes and mark every reachable use case as connected.
     if (diagramType === 'usecase') {
-      const actors   = new Set(
-        tokenStream.filter(t => t.tokenType === TOKEN_TYPES.ACTOR).map(t => t.id)
-      );
-      const useCases = tokenStream.filter(t => t.tokenType === TOKEN_TYPES.USE_CASE);
-      const relTokens = tokenStream.filter(t => t.tokenType === TOKEN_TYPES.RELATIONSHIP);
+      const actorTokens = tokenStream.filter(t => t.tokenType === TOKEN_TYPES.ACTOR);
+      const useCases    = tokenStream.filter(t => t.tokenType === TOKEN_TYPES.USE_CASE);
+      const relTokens   = tokenStream.filter(t => t.tokenType === TOKEN_TYPES.RELATIONSHIP);
+
+      // Build adjacency: id → Set of connected ids (undirected, all rel types)
+      const adj = new Map();
+      const addEdge = (a, b) => {
+        if (!adj.has(a)) adj.set(a, new Set());
+        if (!adj.has(b)) adj.set(b, new Set());
+        adj.get(a).add(b);
+        adj.get(b).add(a);
+      };
+      relTokens.forEach(rel => {
+        const { sourceId, targetId } = rel.attributes;
+        if (sourceId && targetId) addEdge(sourceId, targetId);
+      });
+
+      // BFS from all actor nodes to find every reachable element
+      const reachable = new Set();
+      const queue = actorTokens.map(a => a.id);
+      queue.forEach(id => reachable.add(id));
+      while (queue.length > 0) {
+        const current = queue.shift();
+        (adj.get(current) || new Set()).forEach(neighbor => {
+          if (!reachable.has(neighbor)) {
+            reachable.add(neighbor);
+            queue.push(neighbor);
+          }
+        });
+      }
 
       useCases.forEach(ucToken => {
-        const isConnectedToActor = relTokens.some(rel => {
-          const { sourceId, targetId } = rel.attributes;
-          return (
-            (sourceId === ucToken.id && actors.has(targetId)) ||
-            (targetId === ucToken.id && actors.has(sourceId))
-          );
-        });
-
-        if (!isConnectedToActor) {
+        if (!reachable.has(ucToken.id)) {
           warnings.push(this._issue(
             SEVERITY.WARNING,
             'USE_CASE_NO_ACTOR',
             ucToken.id,
             `Use case '${ucToken.name}' is not connected to any actor`,
-            `The use case '${ucToken.name}' has no relationship to any actor in the diagram. Every use case should be accessible by at least one actor.`,
-            `Connect '${ucToken.name}' to an actor using an association relationship.`
+            `The use case '${ucToken.name}' has no relationship (direct or via include/extend) to any actor in the diagram.`,
+            `Connect '${ucToken.name}' to an actor or to another use case that is already reachable from an actor.`
           ));
         }
       });

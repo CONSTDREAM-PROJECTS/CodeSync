@@ -64,28 +64,40 @@ const TeamCard = ({ name, role, id, color, desc }) => {
       onMouseEnter={() => setHov(true)}
       onMouseLeave={() => setHov(false)}
       style={{
-        background: '#252526',
+        background: hov ? '#2a2d2e' : '#252526',
         border: `1px solid ${hov ? color : '#2d2d30'}`,
         borderRadius: 8, padding: '16px 18px',
-        transition: 'border-color 0.18s',
+        transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+        transform: hov ? 'translateY(-6px) scale(1.02)' : 'translateY(0) scale(1)',
+        boxShadow: hov ? `0 12px 28px ${color}25, 0 6px 12px rgba(0,0,0,0.35)` : 'none',
+        cursor: 'pointer',
       }}
     >
       <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginBottom: 10 }}>
         <div style={{
           width: 44, height: 44, borderRadius: '50%',
-          background: color + '1a', border: `1.5px solid ${color}`,
+          background: hov ? color + '30' : color + '1a', 
+          border: `1.5px solid ${color}`,
           display: 'flex', alignItems: 'center', justifyContent: 'center',
           color, fontSize: 15, fontWeight: 700, flexShrink: 0,
+          transform: hov ? 'scale(1.1) rotate(-5deg)' : 'scale(1) rotate(0deg)',
+          transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+          boxShadow: hov ? `0 0 16px ${color}40` : 'none',
         }}>
           {initials}
         </div>
         <div>
-          <div style={{ color: A2, fontSize: 14, fontWeight: 600 }}>{name}</div>
+          <div style={{ 
+            color: hov ? '#fff' : A2, 
+            fontSize: 14, 
+            fontWeight: 600,
+            transition: 'color 0.2s ease',
+          }}>{name}</div>
           <div style={{ color, fontSize: 12, marginTop: 2 }}>{role}</div>
-          <div style={{ color: '#4a4a4a', fontSize: 11, marginTop: 2 }}>FEU Institute of Technology · {id}</div>
+          <div style={{ color: hov ? '#5a5a5a' : '#4a4a4a', fontSize: 11, marginTop: 2, transition: 'color 0.2s ease' }}>FEU Institute of Technology · {id}</div>
         </div>
       </div>
-      <p style={{ color: '#777', fontSize: 12, lineHeight: 1.65, margin: 0 }}>{desc}</p>
+      <p style={{ color: hov ? '#999' : '#777', fontSize: 12, lineHeight: 1.65, margin: 0, transition: 'color 0.2s ease' }}>{desc}</p>
     </div>
   );
 };

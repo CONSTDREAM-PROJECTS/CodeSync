@@ -77,7 +77,7 @@ function App() {
               <div className="flex items-center gap-2 px-3 py-1.5 rounded bg-[#2d2d30] border border-[#3e3e42]">
                 <User size={14} className="text-[#9c9b7f]" />
                 <span className="text-sm text-[#d9dccc] font-medium">
-                  {(currentUser.username && currentUser.username.trim()) ? currentUser.username : currentUser.email.split('@')[0]}
+                  {currentUser.username || currentUser.email.split('@')[0]}
                 </span>
               </div>
               <button
@@ -164,8 +164,9 @@ function App() {
         <LoginModal
           onClose={() => setShowLogin(false)}
           onLoginSuccess={(user) => {
+            console.log('[App] onLoginSuccess called with:', user);
             setCurrentUser(user);
-            setShowLogin(false);
+            console.log('[App] setCurrentUser called');
           }}
         />
       )}

@@ -69,7 +69,9 @@ import ToolPalette from './ToolPalette';
 import PropertiesPanel from './PropertiesPanel';
 import CodeImportModal from './CodeImportModal';
 import ValidationPanel from './ValidationPanel';
-import LoginModal, { restoreSession, TOKEN_KEY } from './LoginModal';
+import LoginModal, { restoreSession, clearSession, TOKEN_KEY } from './LoginModal';
+// NOTE: LoginModal is no longer rendered here — it lives in App.js.
+// restoreSession / clearSession / TOKEN_KEY are kept exported for App.js to use.
 import { ToastContainer, useToast } from './Toast';
 
 /**
@@ -93,7 +95,7 @@ import { ToastContainer, useToast } from './Toast';
 let _nextId = Date.now();
 const nextId = () => ++_nextId;
 
-const UMLEditor = () => {
+const UMLEditor = ({ currentUser, onLoginSuccess, onLogout }) => {
   // ── Diagram & language state ──────────────────────────────
   // selectedDiagram: which diagram type is active ("class", "usecase", "sequence").
   // language: the target programming language for code generation.
@@ -140,8 +142,6 @@ const UMLEditor = () => {
   // ── Modal state ────────────────────────────────────────────
   // showCodeImportModal: controls visibility of the CodeImportModal overlay.
   const [showCodeImportModal, setShowCodeImportModal] = useState(false);
-  // showLoginModal: controls visibility of the LoginModal overlay.
-  const [showLoginModal, setShowLoginModal] = useState(false);
 
   // ── Inline rename state (Fix #19) ─────────────────────────
   // inlineEditId: id of the element currently being renamed inline on the canvas.
@@ -157,30 +157,22 @@ const UMLEditor = () => {
   const { toasts, showToast, removeToast } = useToast();
 
   // ── Auth + persistence state ───────────────────────────────
-  // currentUser: user object { uid, email } when logged in, null otherwise.
+  // currentUser, onLoginSuccess, onLogout are passed in as props from App.js.
   // diagramId: stable id for this diagram session used as the DB key.
-  const [currentUser, setCurrentUser] = useState(null);
   const [diagramId] = useState(() => `diagram_${Date.now()}`);
 
-  // ── BUG C2 + H2 FIX: Session restore on mount ─────────────
-  // Restores the logged-in user from localStorage JWT on page load so
-  // the user does not have to log in again after every page refresh.
-  // Also listens for the 'codesynch:session-expired' event dispatched by
-  // diagramService.js when a 401 is returned (token expired mid-session).
+  // ── Session-expiry listener ────────────────────────────────
+  // diagramService.js dispatches 'codesynch:session-expired' on a 401.
+  // We bubble it up via onLogout so App.js can open the login modal.
   useEffect(() => {
-    const user = restoreSession();
-    if (user) setCurrentUser(user);
-
     const onExpired = () => {
-      setCurrentUser(null);
-      setShowLoginModal(true);
       showToast('Your session expired. Please log in again.', 'error');
+      onLogout?.();
     };
     window.addEventListener('codesynch:session-expired', onExpired);
     return () => window.removeEventListener('codesynch:session-expired', onExpired);
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [onLogout]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // ── Validation state ───────────────────────────────────────
   // validationResult: the result object from ValidationService.validate().
   // showValidationPanel: controls visibility of the inline error panel.
   const [validationResult, setValidationResult] = useState(null);
@@ -1189,13 +1181,20 @@ const UMLEditor = () => {
             ref={canvasRef}
             className="w-full h-full"
             onClick={handleCanvasClick}
+            onMouseDown={(e) => {
+              // Left-click on empty canvas space starts panning
+              if (e.button === 0) {
+                e.preventDefault();
+                startPanning(e.clientX, e.clientY);
+              }
+            }}
             onMouseMove={handleMouseMove}
             onMouseUp={handleMouseUp}
             onMouseLeave={handleMouseUp}
             onWheel={handleWheelZoom}
             style={{
               cursor: isPanning ? 'grabbing' : 
-                      selectedTool === 'select' ? 'default' : 
+                      selectedTool === 'select' ? 'grab' : 
                       selectedTool === 'delete' ? 'not-allowed' : 
                       'crosshair'
             }}
@@ -2043,17 +2042,7 @@ const UMLEditor = () => {
         <CodeImportModal
           onImport={handleImportCode}
           onClose={() => setShowCodeImportModal(false)}
-        />
-      )}
-
-      {/* Login Modal */}
-      {showLoginModal && (
-        <LoginModal
-          onClose={() => setShowLoginModal(false)}
-          onLoginSuccess={(user) => {
-            setCurrentUser(user);
-            setShowLoginModal(false);
-          }}
+          diagramType={selectedDiagram}
         />
       )}
 

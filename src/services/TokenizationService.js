@@ -558,9 +558,18 @@ class TokenizationService {
   static _buildSymbolTable(tokenStream, connections, elements) {
     const symbolTable = new Map();
 
-    // First pass: register every class
+    // First pass: register every class, actor, and use case.
+    // ACTOR and USE_CASE tokens must be registered here so that
+    // ValidationService._structuralValidation() can find them when it
+    // checks RELATIONSHIP endpoints against the symbol table. Without
+    // this, every association in a use case diagram fires a false-positive
+    // "Relationship references undefined class 'X'" error (BUG FIX).
     tokenStream
-      .filter(t => t.tokenType === TOKEN_TYPES.CLASS_DEF)
+      .filter(t =>
+        t.tokenType === TOKEN_TYPES.CLASS_DEF ||
+        t.tokenType === TOKEN_TYPES.ACTOR     ||
+        t.tokenType === TOKEN_TYPES.USE_CASE
+      )
       .forEach(token => {
         symbolTable.set(token.name, {
           tokenId:       token.id,
@@ -568,9 +577,12 @@ class TokenizationService {
           attributes:    [],   // filled in second pass from ATTRIBUTE tokens
           methods:       [],   // filled in second pass from METHOD tokens
           relationships: [],   // filled in third pass from RELATIONSHIP tokens
-          isAbstract:    token.attributes.isAbstract,
-          isInterface:   token.attributes.isInterface,
-          visibility:    token.attributes.visibilityModifier
+          isAbstract:    token.attributes.isAbstract   || false,
+          isInterface:   token.attributes.isInterface  || false,
+          visibility:    token.attributes.visibilityModifier || 'public',
+          // Preserve the token kind so callers can distinguish actors/use
+          // cases from real class definitions when needed.
+          tokenType:     token.tokenType
         });
       });
 

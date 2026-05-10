@@ -106,6 +106,13 @@ class CodeToUMLConverter {
       return {
         success: true,
         message: `Successfully converted ${ast.classes.length} classes to UML`,
+        // BUG FIX: replaceAll tells UMLEditor to REPLACE the current canvas
+        // elements/connections rather than merging with them. Without this,
+        // stale elements from a previous diagram (e.g. the default placeholder
+        // "Name" actor) remain on the canvas alongside the newly converted ones,
+        // causing phantom validation warnings like "Actor 'Name' is not connected
+        // to any use case."
+        replaceAll: true,
         elements,
         connections,
         patterns,
@@ -170,6 +177,22 @@ class CodeToUMLConverter {
     );
     if (isDefinitivelyPlantUML) {
       return this.parsePlantUMLAST(sourceCode);
+    }
+
+    // ── Annotation-based use case detection ──────────────────────────────
+    // Must run BEFORE the language switch so Java/Python/JS files that use
+    // @Actor / @UseCase annotations are routed to the use case parser
+    // regardless of which language is selected in the dropdown.
+    const isAnnotatedUseCase = (
+      /@Actor\s*\(/.test(sourceCode)   ||
+      /@UseCase\s*\(/.test(sourceCode) ||
+      /\/\/\s*@Actor\s*\(/.test(sourceCode)   ||
+      /\/\/\s*@UseCase\s*\(/.test(sourceCode) ||
+      /#\s*@Actor\s*\(/.test(sourceCode)      ||
+      /#\s*@UseCase\s*\(/.test(sourceCode)
+    );
+    if (isAnnotatedUseCase) {
+      return CodeToUMLConverter.parseAnnotatedUseCaseAST(sourceCode);
     }
 
     switch(language.toLowerCase()) {
@@ -654,6 +677,111 @@ class CodeToUMLConverter {
    *
    * RELATIONSHIP: Called by parseSourceCode() for PlantUML input.
    */
+
+  // ============================================================
+  // parseAnnotatedUseCaseAST
+  // ============================================================
+  // Parses Java, Python, or JavaScript files that use special
+  // annotations to describe a use case diagram.
+  //
+  // JAVA / JAVASCRIPT syntax:
+  //   @Actor("Site User")
+  //   @UseCase("Search docs")
+  //   @Association("Site User", "Search docs")
+  //   @Includes("Search docs", "Download docs")
+  //   @Extends("Upload docs", "Manage folders")
+  //
+  // PYTHON syntax (same but prefixed with #):
+  //   # @Actor("Site User")
+  //   # @UseCase("Search docs")
+  //   # @Association("Site User", "Search docs")
+  //   # @Includes("Search docs", "Download docs")
+  //   # @Extends("Upload docs", "Manage folders")
+  // ============================================================
+  static parseAnnotatedUseCaseAST(sourceCode) {
+    const ast = { classes: [], imports: [] };
+    const seen = new Set();
+
+    // Helper: strip quotes and trim
+    const clean = (s) => (s || '').replace(/['"]/g, '').trim();
+    // Helper: make a key from a label (no spaces)
+    const toKey = (s) => clean(s).replace(/\s+/g, '');
+
+    // Helper: find element by key or label
+    const findEl = (raw) => {
+      const key = toKey(raw);
+      return ast.classes.find(c => c.name === key) ||
+             ast.classes.find(c => c.label === clean(raw));
+    };
+
+    // ── Parse @Actor("Name") or // @Actor("Name") or # @Actor("Name") ──
+    const actorRe = /(?:\/\/\s*|#\s*)?@Actor\(\s*["']?([^"'\n)]+)["']?\s*\)/g;
+    let m;
+    while ((m = actorRe.exec(sourceCode)) !== null) {
+      const label = clean(m[1]);
+      const key   = toKey(label);
+      if (!seen.has(key)) {
+        seen.add(key);
+        ast.classes.push({
+          name: key, label,
+          elementType: 'actor',
+          extends: null, implements: [],
+          attributes: [], methods: [],
+          isAbstract: false, _rels: []
+        });
+      }
+    }
+
+    // ── Parse @UseCase("Name") ──────────────────────────────────────────
+    const ucRe = /(?:\/\/\s*|#\s*)?@UseCase\(\s*["']?([^"'\n)]+)["']?\s*\)/g;
+    while ((m = ucRe.exec(sourceCode)) !== null) {
+      const label = clean(m[1]);
+      const key   = toKey(label);
+      if (!seen.has(key)) {
+        seen.add(key);
+        ast.classes.push({
+          name: key, label,
+          elementType: 'usecase',
+          extends: null, implements: [],
+          attributes: [], methods: [],
+          isAbstract: false, _rels: []
+        });
+      }
+    }
+
+    // ── Parse @Association("From", "To") — solid line ──────────────────
+    const assocRe = /(?:\/\/\s*|#\s*)?@Association\(\s*["']?([^"'\n,)]+)["']?\s*,\s*["']?([^"'\n)]+)["']?\s*\)/g;
+    while ((m = assocRe.exec(sourceCode)) !== null) {
+      const fromEl = findEl(m[1]);
+      const toEl   = findEl(m[2]);
+      if (fromEl && toEl) {
+        fromEl._rels.push({ targetName: toEl.name, connType: 'association', label: '' });
+      }
+    }
+
+    // ── Parse @Includes("From", "To") — dashed <<include>> arrow ───────
+    const includeRe = /(?:\/\/\s*|#\s*)?@Includes\(\s*["']?([^"'\n,)]+)["']?\s*,\s*["']?([^"'\n)]+)["']?\s*\)/g;
+    while ((m = includeRe.exec(sourceCode)) !== null) {
+      const fromEl = findEl(m[1]);
+      const toEl   = findEl(m[2]);
+      if (fromEl && toEl) {
+        fromEl._rels.push({ targetName: toEl.name, connType: 'include', label: '<<include>>' });
+      }
+    }
+
+    // ── Parse @Extends("From", "To") — dashed <<extend>> arrow ─────────
+    const extendRe = /(?:\/\/\s*|#\s*)?@Extends\(\s*["']?([^"'\n,)]+)["']?\s*,\s*["']?([^"'\n)]+)["']?\s*\)/g;
+    while ((m = extendRe.exec(sourceCode)) !== null) {
+      const fromEl = findEl(m[1]);
+      const toEl   = findEl(m[2]);
+      if (fromEl && toEl) {
+        fromEl._rels.push({ targetName: toEl.name, connType: 'extend', label: '<<extend>>' });
+      }
+    }
+
+    return ast;
+  }
+
   static parsePlantUMLAST(sourceCode) {
     const ast = { classes: [], imports: [] };
 
@@ -705,58 +833,129 @@ class CodeToUMLConverter {
    */
   static parsePlantUMLUseCaseAST(sourceCode) {
     const ast = { classes: [], imports: [] };
+    const seen     = new Set(); // element name keys already added
+    const aliasMap = {};        // alias → name key  e.g. "Search" → "Searchdocsfulltext"
+    const labelMap = {};        // alias → display label e.g. "Search" → "Search docs full text"
 
-    // Parse actors — "actor Name" or "actor :Name:" or "actor Name as Alias"
-    const actorRegex = /^actor\s+"?([^"\n]+?)"?\s*(?:as\s+(\w+))?$/gm;
+    // ── Helper: normalise a raw token to a lookup key ─────────────────────
+    // Strips parens, trims, collapses spaces so "Search docs full text" → "Searchdocsfulltext"
+    const toKey = (raw) => raw.replace(/[()]/g, '').trim().replace(/\s+/g, '');
+
+    // ── 1. Parse actors ───────────────────────────────────────────────────
+    // Handles:  actor "Site User" as SiteUser
+    //           actor Webmaster
+    const actorRegex = /^actor\s+"?([^"\n]+?)"?\s*(?:as\s+(\w+))?\s*$/gm;
     let match;
+
     while ((match = actorRegex.exec(sourceCode)) !== null) {
-      const name  = match[2] || match[1].trim();
       const label = match[1].trim();
-      ast.classes.push({
-        name: name,
-        label: label,
-        elementType: 'actor',
-        extends: null,
-        implements: [],
-        attributes: [],
-        methods: [],
-        isAbstract: false,
-        _rels: []
-      });
-    }
+      const alias = match[2] || null;
+      const key   = alias || toKey(label);
 
-    // Parse use cases — "(Use Case Name)" or "usecase (Name)" or "usecase Name"
-    const ucRegex = /(?:usecase\s+)?\(([^)]+)\)(?:\s+as\s+(\w+))?/g;
-    while ((match = ucRegex.exec(sourceCode)) !== null) {
-      const label = match[1].trim();
-      const name  = match[2] || label.replace(/\s+/g, '');
-      ast.classes.push({
-        name: name,
-        label: label,
-        elementType: 'usecase',
-        extends: null,
-        implements: [],
-        attributes: [],
-        methods: [],
-        isAbstract: false
-      });
-    }
-
-    // Parse relationships
-    const relRegex = /(\w+|\([^)]+\))\s*(-->|--|\.\.|\.>|<--)\s*(\w+|\([^)]+\))(?:\s*:\s*(.+))?/g;
-    while ((match = relRegex.exec(sourceCode)) !== null) {
-      const [, from, arrow, to, label] = match;
-      const fromName = from.replace(/[()]/g, '').trim().replace(/\s+/g, '');
-      const toName   = to.replace(/[()]/g, '').trim().replace(/\s+/g, '');
-
-      const fromEl = ast.classes.find(c => c.name === fromName || c.label === from.replace(/[()]/g,'').trim());
-      const toEl   = ast.classes.find(c => c.name === toName   || c.label === to.replace(/[()]/g,'').trim());
-
-      // Store relationship on target for later processing
-      if (fromEl && toEl) {
-        if (!fromEl._rels) fromEl._rels = [];
-        fromEl._rels.push({ targetName: toEl.name, arrow, label: label?.trim() || '' });
+      if (alias) {
+        aliasMap[alias] = key;
+        labelMap[alias] = label;
       }
+      aliasMap[toKey(label)] = key; // also map by label key
+
+      if (!seen.has(key)) {
+        seen.add(key);
+        ast.classes.push({
+          name: key, label,
+          elementType: 'actor',
+          extends: null, implements: [],
+          attributes: [], methods: [],
+          isAbstract: false, _rels: []
+        });
+      }
+    }
+
+    // ── 2. Parse use case declarations ────────────────────────────────────
+    // Handles:  (Search docs full text) as (Search)
+    //           (Log in)
+    //           usecase (Browse docs)
+    // IMPORTANT: only match lines that declare a use case — NOT alias-only references
+    // We detect declarations by requiring the full-text label to appear
+    // i.e. the match must appear on lines that use "as" OR have a multi-word label
+    const ucDeclRegex = /^\s*(?:usecase\s+)?\(([^)]+)\)\s*(?:as\s+\((\w+)\))?\s*$/gm;
+
+    while ((match = ucDeclRegex.exec(sourceCode)) !== null) {
+      const label = match[1].trim();
+      const alias = match[2] || null;
+      const key   = alias || toKey(label);
+
+      if (alias) {
+        aliasMap[alias] = key;
+        labelMap[alias] = label;
+      }
+      aliasMap[toKey(label)] = key;
+
+      if (!seen.has(key)) {
+        seen.add(key);
+        ast.classes.push({
+          name: key, label,
+          elementType: 'usecase',
+          extends: null, implements: [],
+          attributes: [], methods: [],
+          isAbstract: false, _rels: []
+        });
+      }
+    }
+
+    // ── 3. Helper: resolve any token to an element ────────────────────────
+    // Handles plain names (SiteUser), aliases (Search),
+    // parenthesised aliases ((Search)), full labels ("Search docs full text")
+    const findEl = (raw) => {
+      const cleaned = raw.replace(/[()]/g, '').trim();
+      const key     = toKey(cleaned);
+
+      // Direct key match
+      let el = ast.classes.find(c => c.name === key);
+      if (el) return el;
+
+      // Alias map lookup
+      const mappedKey = aliasMap[cleaned] || aliasMap[key];
+      if (mappedKey) return ast.classes.find(c => c.name === mappedKey);
+
+      // Label match (fallback)
+      return ast.classes.find(c => c.label === cleaned);
+    };
+
+    // ── 4. Parse relationships ────────────────────────────────────────────
+    // Handles:
+    //   SiteUser --> (Search)
+    //   (Search) --> (Download)
+    //   (Upload) .> (ManageFolders)
+    //   (AddUser) ..> (AddCompany)
+    //   (UC1) --> (UC2) : <<include>>
+    const relRegex = /^\s*(\w[\w\s]*|\([^)]+\))\s*(-->|--|\.\.>|\.>|\.\.)\s*(\w[\w\s]*|\([^)]+\))(?:\s*:\s*(.+))?\s*$/gm;
+
+    while ((match = relRegex.exec(sourceCode)) !== null) {
+      const [, rawFrom, arrow, rawTo, label] = match;
+      const fromEl = findEl(rawFrom.trim());
+      const toEl   = findEl(rawTo.trim());
+
+      if (!fromEl || !toEl) continue;
+
+      const labelText = (label || '').trim().toLowerCase();
+      let connType  = 'association';
+      let connLabel = '';
+
+      if (arrow === '.>' || arrow === '..>' || labelText.includes('include')) {
+        connType  = 'include';
+        connLabel = '<<include>>';
+      } else if (arrow === '..' || labelText.includes('extend')) {
+        connType  = 'extend';
+        connLabel = '<<extend>>';
+      } else if (fromEl.elementType === 'usecase' && toEl.elementType === 'usecase') {
+        // usecase → usecase with plain --> is <<include>> by convention
+        connType  = 'include';
+        connLabel = '<<include>>';
+      }
+      // actor → usecase with --> stays as 'association' (solid line)
+
+      if (!fromEl._rels) fromEl._rels = [];
+      fromEl._rels.push({ targetName: toEl.name, connType, label: connLabel });
     }
 
     return ast;
@@ -1295,6 +1494,202 @@ class CodeToUMLConverter {
     const methodHeight = (cls.methods?.length || 0) * 18;
     return Math.max(100, baseHeight + attrHeight + methodHeight + 30);
   }
+
+  // ============================================================
+  // SEQUENCE DIAGRAM PARSER — Java, Python, JavaScript
+  // ============================================================
+
+  static convertCodeToUMLSequence(sourceCode, language = 'Java') {
+    try {
+      let lifelines, messages;
+      switch (language.toLowerCase()) {
+        case 'python':
+          ({ lifelines, messages } = this.parseSequencePython(sourceCode));
+          break;
+        case 'javascript':
+        case 'js':
+          ({ lifelines, messages } = this.parseSequenceJavaScript(sourceCode));
+          break;
+        default:
+          ({ lifelines, messages } = this.parseSequenceJava(sourceCode));
+      }
+
+      if (lifelines.length === 0) {
+        return {
+          success: false,
+          message: `No classes found in ${language} code. Ensure you have class definitions.`,
+          elements: [], connections: [], patterns: []
+        };
+      }
+
+      const ts = Date.now();
+      lifelines.forEach((ll, i) => { ll.id = `seq_${ts}_${i}`; });
+      const nameToId = {};
+      lifelines.forEach(ll => { nameToId[ll.name] = ll.id; });
+
+      const SPACING = 220;
+      const elements = lifelines.map((ll, i) => ({
+        id: ll.id, type: 'lifeline', name: ll.name,
+        x: 80 + i * SPACING, y: 80,
+        width: 160, height: 100,
+        attributes: [], methods: [], stereotype: ''
+      }));
+
+      const seen = new Set();
+      const connections = [];
+      messages.forEach(msg => {
+        const fromId = nameToId[msg.from];
+        const toId   = nameToId[msg.to];
+        if (!fromId || !toId || fromId === toId) return;
+        const key = `${fromId}__${toId}__${msg.label}`;
+        if (seen.has(key)) return;
+        seen.add(key);
+        connections.push({
+          id: `conn_${Date.now()}_${Math.random()}`,
+          from: fromId, to: toId,
+          type: msg.isReturn ? 'return' : 'message',
+          label: msg.label || '',
+          fromMultiplicity: '', toMultiplicity: '', fromRole: '', toRole: ''
+        });
+      });
+
+      return {
+        success: true, replaceAll: true,
+        message: `Extracted ${lifelines.length} lifelines and ${connections.length} messages`,
+        elements, connections, patterns: [],
+        metadata: {
+          sourceLanguage: language,
+          totalClasses: lifelines.length, totalMethods: 0,
+          totalAttributes: 0, relationships: connections.length, patternsDetected: 0
+        }
+      };
+    } catch (err) {
+      return { success: false, message: `Sequence parse error: ${err.message}`, elements: [], connections: [], patterns: [] };
+    }
+  }
+
+  static parseSequenceJava(sourceCode) {
+    const lifelines = [];
+    const messages  = [];
+    const classRegex = /(?:public\s+)?(?:abstract\s+)?(?:static\s+)?class\s+(\w+)[^{]*\{([\s\S]*?)(?=\n\}(?:\s|$))/g;
+    let classMatch;
+    while ((classMatch = classRegex.exec(sourceCode)) !== null) {
+      const className = classMatch[1];
+      const classBody = classMatch[2];
+      if (className === 'SequenceHandler') continue;
+      lifelines.push({ name: className });
+      const fieldMap = {};
+      // Field declarations: "private AuthService authService;"
+      const fieldRegex = /(?:private|public|protected)?\s+([A-Z]\w+)\s+(\w+)\s*[=;]/g;
+      let fm;
+      while ((fm = fieldRegex.exec(classBody)) !== null) {
+        fieldMap[fm[2]] = fm[1];
+      }
+      // Constructor params: "public LoginPage(AuthService authService, ...)"
+      const ctorRegex = /public\s+\w+\s*\(([^)]+)\)/g;
+      let cm;
+      while ((cm = ctorRegex.exec(classBody)) !== null) {
+        cm[1].split(',').forEach(param => {
+          const parts = param.trim().split(/\s+/);
+          if (parts.length >= 2 && /^[A-Z]/.test(parts[0])) fieldMap[parts[1]] = parts[0];
+        });
+      }
+      // Method calls: "fieldName.methodName("
+      const callRegex = /(\w+)\.(\w+)\s*\(/g;
+      let call;
+      while ((call = callRegex.exec(classBody)) !== null) {
+        const targetClass = fieldMap[call[1]];
+        if (targetClass && targetClass !== className) {
+          messages.push({ from: className, to: targetClass, label: call[2], isReturn: false });
+        }
+      }
+    }
+    return { lifelines, messages };
+  }
+
+  static parseSequencePython(sourceCode) {
+    const lifelines = [];
+    const messages  = [];
+    const classStartRegex = /^class\s+(\w+)(?:\([^)]*\))?\s*:/gm;
+    const classStarts = [];
+    let m;
+    while ((m = classStartRegex.exec(sourceCode)) !== null) {
+      classStarts.push({ name: m[1], pos: m.index });
+    }
+    classStarts.forEach((cls, i) => {
+      const endPos    = i + 1 < classStarts.length ? classStarts[i + 1].pos : sourceCode.length;
+      const classBody = sourceCode.slice(cls.pos, endPos);
+      const className = cls.name;
+      lifelines.push({ name: className });
+      const fieldMap = {};
+      // __init__ type-hinted params: "def __init__(self, auth: AuthService)"
+      const initMatch = classBody.match(/def\s+__init__\s*\(([^)]+)\)/);
+      if (initMatch) {
+        initMatch[1].split(',').forEach(param => {
+          const ann = param.match(/(\w+)\s*:\s*(\w+)/);
+          if (ann && ann[1] !== 'self' && /^[A-Z]/.test(ann[2])) fieldMap[ann[1]] = ann[2];
+        });
+      }
+      // self.field = param assignments
+      const selfRegex = /self\.(\w+)\s*=\s*(\w+)/g;
+      let sa;
+      while ((sa = selfRegex.exec(classBody)) !== null) {
+        if (/^[A-Z]/.test(sa[2])) fieldMap[sa[1]] = sa[2];
+        else if (fieldMap[sa[2]]) fieldMap[sa[1]] = fieldMap[sa[2]];
+      }
+      // self.field.method( calls
+      const callRegex = /self\.(\w+)\.(\w+)\s*\(/g;
+      let call;
+      while ((call = callRegex.exec(classBody)) !== null) {
+        const targetClass = fieldMap[call[1]];
+        if (targetClass && targetClass !== className) {
+          messages.push({ from: className, to: targetClass, label: call[2], isReturn: false });
+        }
+      }
+    });
+    return { lifelines, messages };
+  }
+
+  static parseSequenceJavaScript(sourceCode) {
+    const lifelines = [];
+    const messages  = [];
+    const classRegex = /class\s+(\w+)[^{]*\{([\s\S]*?)(?=\nclass\s|$)/g;
+    let classMatch;
+    while ((classMatch = classRegex.exec(sourceCode)) !== null) {
+      const className = classMatch[1];
+      const classBody = classMatch[2];
+      if (className === 'SequenceHandler') continue;
+      lifelines.push({ name: className });
+      const fieldMap = {};
+      // constructor params + this.x = y assignments
+      const ctorMatch = classBody.match(/constructor\s*\(([^)]*)\)\s*\{([\s\S]*?)(?=\n\s{0,4}\w|$)/);
+      if (ctorMatch) {
+        const ctorParams = ctorMatch[1].split(',').map(p => p.trim()).filter(Boolean);
+        const ctorBody   = ctorMatch[2];
+        const thisRx = /this\.(\w+)\s*=\s*(\w+)/g;
+        let ta;
+        while ((ta = thisRx.exec(ctorBody)) !== null) {
+          const matched = ctorParams.find(p => p === ta[2]);
+          if (matched) {
+            const inferred = matched.charAt(0).toUpperCase() + matched.slice(1);
+            fieldMap[ta[1]] = inferred;
+          }
+          if (/^[A-Z]/.test(ta[2])) fieldMap[ta[1]] = ta[2];
+        }
+      }
+      // this.field.method( calls
+      const callRegex = /this\.(\w+)\.(\w+)\s*\(/g;
+      let call;
+      while ((call = callRegex.exec(classBody)) !== null) {
+        const targetClass = fieldMap[call[1]];
+        if (targetClass && targetClass !== className) {
+          messages.push({ from: className, to: targetClass, label: call[2], isReturn: false });
+        }
+      }
+    }
+    return { lifelines, messages };
+  }
+
 }
 
 /**

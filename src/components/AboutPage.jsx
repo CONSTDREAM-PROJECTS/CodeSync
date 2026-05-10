@@ -76,17 +76,32 @@ const FeatureCard = ({ icon, title, desc, accent }) => {
       onMouseEnter={() => setHov(true)}
       onMouseLeave={() => setHov(false)}
       style={{
-        background: '#252526',
+        background: hov ? '#2a2d2e' : '#252526',
         border: `1px solid ${hov ? accent : '#2d2d30'}`,
         borderRadius: 8, padding: '14px 16px',
         display: 'flex', gap: 12,
-        transition: 'border-color 0.18s',
+        transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+        transform: hov ? 'translateY(-4px) scale(1.02)' : 'translateY(0) scale(1)',
+        boxShadow: hov ? `0 8px 24px ${accent}20, 0 4px 8px rgba(0,0,0,0.3)` : 'none',
+        cursor: 'pointer',
       }}
     >
-      <div style={{ color: accent, flexShrink: 0, marginTop: 1 }}>{icon}</div>
+      <div style={{ 
+        color: accent, 
+        flexShrink: 0, 
+        marginTop: 1,
+        transform: hov ? 'scale(1.15) rotate(5deg)' : 'scale(1) rotate(0deg)',
+        transition: 'transform 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+      }}>{icon}</div>
       <div>
-        <div style={{ color: A2, fontSize: 13, fontWeight: 600, marginBottom: 4 }}>{title}</div>
-        <div style={{ color: '#777', fontSize: 12, lineHeight: 1.65 }}>{desc}</div>
+        <div style={{ 
+          color: hov ? '#fff' : A2, 
+          fontSize: 13, 
+          fontWeight: 600, 
+          marginBottom: 4,
+          transition: 'color 0.2s ease',
+        }}>{title}</div>
+        <div style={{ color: hov ? '#999' : '#777', fontSize: 12, lineHeight: 1.65, transition: 'color 0.2s ease' }}>{desc}</div>
       </div>
     </div>
   );
@@ -94,25 +109,45 @@ const FeatureCard = ({ icon, title, desc, accent }) => {
 
 const FaqItem = ({ item }) => {
   const [open, setOpen] = useState(false);
+  const [hov, setHov] = useState(false);
   return (
-    <div style={{
-      border: `1px solid ${open ? A1 : '#2d2d30'}`,
-      borderRadius: 7, overflow: 'hidden',
-      transition: 'border-color 0.18s', marginBottom: 6,
-    }}>
+    <div 
+      onMouseEnter={() => setHov(true)}
+      onMouseLeave={() => setHov(false)}
+      style={{
+        border: `1px solid ${open ? A1 : hov ? A1 + '66' : '#2d2d30'}`,
+        borderRadius: 7, overflow: 'hidden',
+        transition: 'all 0.25s cubic-bezier(0.4,0,0.2,1)', 
+        marginBottom: 6,
+        transform: hov && !open ? 'translateX(4px)' : 'translateX(0)',
+        boxShadow: hov ? `0 2px 8px ${A1}15` : 'none',
+      }}>
       <button
         onClick={() => setOpen(o => !o)}
         style={{
           width: '100%', display: 'flex', alignItems: 'center',
           justifyContent: 'space-between', padding: '11px 16px',
-          background: open ? '#2a2d2e' : '#252526',
+          background: open ? '#2a2d2e' : hov ? '#282828' : '#252526',
           border: 'none', cursor: 'pointer', textAlign: 'left',
+          transition: 'background 0.2s ease',
         }}
       >
-        <span style={{ color: A2, fontSize: 13, fontWeight: 500, paddingRight: 16, lineHeight: 1.4 }}>
+        <span style={{ 
+          color: hov || open ? '#fff' : A2, 
+          fontSize: 13, 
+          fontWeight: 500, 
+          paddingRight: 16, 
+          lineHeight: 1.4,
+          transition: 'color 0.2s ease',
+        }}>
           {item.q}
         </span>
-        <span style={{ color: A1, flexShrink: 0 }}>
+        <span style={{ 
+          color: A1, 
+          flexShrink: 0,
+          transform: open ? 'rotate(0deg)' : hov ? 'rotate(-90deg)' : 'rotate(0deg)',
+          transition: 'transform 0.25s cubic-bezier(0.4,0,0.2,1)',
+        }}>
           {open ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
         </span>
       </button>

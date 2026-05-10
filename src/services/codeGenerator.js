@@ -239,20 +239,34 @@ class CodeGenerator {
    * splitIntoFiles() before any language-specific dispatch occurs.
    */
   static normalizeModel(elements, connections) {
-    const els = elements.map(el => ({
-      ...el,
-      name:       this.normalizeIdentifier(el.name, 'class'),
-      attributes: (el.attributes || []).map(a => ({
-        ...a,
-        name: this.normalizeIdentifier(a.name, 'variable'),
-        type: this.normalizeType(a.type)
-      })),
-      methods: (el.methods || []).map(m => ({
-        ...m,
-        name:       this.normalizeIdentifier(m.name, 'method'),
-        returnType: this.normalizeType(m.returnType)
-      }))
-    }));
+    // BUG FIX (root cause of mangled use case names):
+    // normalizeIdentifier() strips ALL non-alphanumeric characters including
+    // spaces. Correct for class identifiers ("bank account" -> "BankAccount")
+    // but wrong for actor/usecase/lifeline elements whose names are human-readable
+    // phrases like "Search docs full text". These must reach generateUseCaseHandler()
+    // intact so they can be camelCased there. Fix: skip normalisation for
+    // behavioural element types entirely.
+    const BEHAVIOURAL_TYPES = new Set(['actor', 'usecase', 'lifeline']);
+
+    const els = elements.map(el => {
+      if (BEHAVIOURAL_TYPES.has(el.type)) {
+        return el; // preserve original human-readable name
+      }
+      return {
+        ...el,
+        name:       this.normalizeIdentifier(el.name, 'class'),
+        attributes: (el.attributes || []).map(a => ({
+          ...a,
+          name: this.normalizeIdentifier(a.name, 'variable'),
+          type: this.normalizeType(a.type)
+        })),
+        methods: (el.methods || []).map(m => ({
+          ...m,
+          name:       this.normalizeIdentifier(m.name, 'method'),
+          returnType: this.normalizeType(m.returnType)
+        }))
+      };
+    });
     return { elements: els, connections };
   }
 
@@ -921,6 +935,26 @@ class CodeGenerator {
         : '// No use cases defined\n';
     }
 
+    // BUG FIX: normalizeIdentifier() strips ALL non-alphanumeric characters before
+    // capitalising, so "Search docs full text" collapsed to "Searchdocsfulltext".
+    // Use-case names are multi-word phrases — they need word-boundary camelCase,
+    // not character stripping. toCamelCase() splits on spaces/special chars,
+    // capitalises each word, and joins — producing "searchDocsFullText" which is
+    // readable and follows standard Java/JS naming conventions.
+    const toCamelCase = (phrase) => {
+      const words = phrase.trim().split(/[\s_\-]+/);
+      return words
+        .map((w, i) => {
+          // Strip any remaining non-alphanumeric characters from each word
+          const clean = w.replace(/[^a-zA-Z0-9]/g, '');
+          if (!clean) return '';
+          return i === 0
+            ? clean.charAt(0).toLowerCase() + clean.slice(1)
+            : clean.charAt(0).toUpperCase() + clean.slice(1);
+        })
+        .join('');
+    };
+
     let code = '';
 
     if (language === 'Java') {
@@ -928,7 +962,7 @@ class CodeGenerator {
       code += '/**\n * Auto-generated Use Case Handler.\n */\n';
       code += 'public class UseCaseHandler {\n\n';
       usecases.forEach(uc => {
-        const m  = this.normalizeIdentifier(uc.name, 'method');
+        const m  = toCamelCase(uc.name);
         const mC = m.charAt(0).toUpperCase() + m.slice(1);
         code += `    /**\n     * Execute use case: ${uc.name}\n     */\n`;
         code += `    public boolean execute${mC}() {\n`;
@@ -940,7 +974,7 @@ class CodeGenerator {
       code += '    public static void main(String[] args) {\n';
       code += '        UseCaseHandler handler = new UseCaseHandler();\n';
       usecases.forEach(uc => {
-        const m  = this.normalizeIdentifier(uc.name, 'method');
+        const m  = toCamelCase(uc.name);
         const mC = m.charAt(0).toUpperCase() + m.slice(1);
         code += `        System.out.println("${uc.name}: " + handler.execute${mC}());\n`;
       });
@@ -951,7 +985,8 @@ class CodeGenerator {
       code += 'class UseCaseHandler:\n';
       code += '    """Auto-generated Use Case Handler."""\n\n';
       usecases.forEach(uc => {
-        const m = this.normalizeIdentifier(uc.name, 'method');
+        // Python convention: snake_case
+        const m = uc.name.trim().toLowerCase().replace(/[\s\-]+/g, '_').replace(/[^a-z0-9_]/g, '');
         code += `    def execute_${m}(self) -> bool:\n`;
         code += `        """Execute use case: ${uc.name}\"\"\"\n`;
         code += `        # TODO: implement "${uc.name}"\n`;
@@ -960,7 +995,7 @@ class CodeGenerator {
       code += '\nif __name__ == "__main__":\n';
       code += '    handler = UseCaseHandler()\n';
       usecases.forEach(uc => {
-        const m = this.normalizeIdentifier(uc.name, 'method');
+        const m = uc.name.trim().toLowerCase().replace(/[\s\-]+/g, '_').replace(/[^a-z0-9_]/g, '');
         code += `    print("${uc.name}:", handler.execute_${m}())\n`;
       });
 
@@ -968,7 +1003,7 @@ class CodeGenerator {
       code += '/**\n * Auto-generated Use Case Handler.\n */\n';
       code += 'class UseCaseHandler {\n\n';
       usecases.forEach(uc => {
-        const m  = this.normalizeIdentifier(uc.name, 'method');
+        const m  = toCamelCase(uc.name);
         const mC = m.charAt(0).toUpperCase() + m.slice(1);
         code += `    /** Execute use case: ${uc.name} */\n`;
         code += `    execute${mC}() {\n`;
@@ -981,7 +1016,7 @@ class CodeGenerator {
       code += '// ── Demo ──────────────────────────────────────────────\n';
       code += '// const h = new UseCaseHandler();\n';
       usecases.forEach(uc => {
-        const m  = this.normalizeIdentifier(uc.name, 'method');
+        const m  = toCamelCase(uc.name);
         const mC = m.charAt(0).toUpperCase() + m.slice(1);
         code += `// console.log("${uc.name}:", h.execute${mC}());\n`;
       });
@@ -994,27 +1029,53 @@ class CodeGenerator {
     let doc = '# Use Case Diagram Documentation\n\n';
     doc += '## Actors\n\n';
     elements.filter(e => e.type === 'actor').forEach(actor => {
-      const ucNames = connections
-        .filter(c => c.from === actor.id || c.to === actor.id)
+      // Only show direct associations (solid lines) for actor→use case
+      const directUcNames = connections
+        .filter(c => (c.from === actor.id || c.to === actor.id) && c.type === 'association')
         .map(c => {
           const ucId = c.from === actor.id ? c.to : c.from;
           return elements.find(e => e.id === ucId)?.name || '';
         })
         .filter(Boolean);
-      doc += `### ${actor.name}\n- **Use Cases**: ${ucNames.join(', ') || 'none'}\n\n`;
+      doc += `### ${actor.name}\n- **Use Cases**: ${directUcNames.join(', ') || 'none'}\n\n`;
     });
+
     doc += '## Use Cases\n\n';
     elements.filter(e => e.type === 'usecase').forEach(uc => {
       doc += `### ${uc.name}\n`;
       doc += `- **Description**: ${uc.description || 'No description provided'}\n`;
+
+      // Actors directly associated
       const actorNames = connections
-        .filter(c => c.from === uc.id || c.to === uc.id)
+        .filter(c => (c.from === uc.id || c.to === uc.id) && c.type === 'association')
         .map(c => {
           const actorId = c.from === uc.id ? c.to : c.from;
           return elements.find(e => e.id === actorId && e.type === 'actor')?.name || '';
         })
         .filter(Boolean);
-      doc += `- **Actors**: ${actorNames.join(', ') || 'none'}\n\n`;
+      doc += `- **Actors**: ${actorNames.join(', ') || 'none'}\n`;
+
+      // BUG FIX: Also list <<include>> and <<extend>> relationships so the
+      // documentation reflects the full diagram structure, not just direct actor ties.
+      const includes = connections
+        .filter(c => c.from === uc.id && (c.type === 'include' || c.label?.includes('include')))
+        .map(c => elements.find(e => e.id === c.to)?.name || '')
+        .filter(Boolean);
+      if (includes.length) doc += `- **Includes**: ${includes.join(', ')}\n`;
+
+      const extendedBy = connections
+        .filter(c => c.to === uc.id && (c.type === 'extend' || c.label?.includes('extend')))
+        .map(c => elements.find(e => e.id === c.from)?.name || '')
+        .filter(Boolean);
+      if (extendedBy.length) doc += `- **Extended by**: ${extendedBy.join(', ')}\n`;
+
+      const includedBy = connections
+        .filter(c => c.to === uc.id && (c.type === 'include' || c.label?.includes('include')))
+        .map(c => elements.find(e => e.id === c.from)?.name || '')
+        .filter(Boolean);
+      if (includedBy.length) doc += `- **Included by**: ${includedBy.join(', ')}\n`;
+
+      doc += '\n';
     });
     return doc;
   }
