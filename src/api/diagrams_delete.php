@@ -3,10 +3,11 @@
 // diagrams_delete.php — DELETE /api/diagrams/delete
 // ============================================================
 // Headers: Authorization: Bearer <token>
-// Body (JSON): { "diagramId": "diagram_1234567890" }
+// Accepts diagramId from either:
+//   - Query param: DELETE /diagrams_delete.php?diagramId=diagram_123
+//   - JSON body:   { "diagramId": "diagram_123" }
 // Returns: { "message": "Deleted." }
 // ============================================================
-
 require_once __DIR__ . '/cors.php';
 require_once __DIR__ . '/database.php';
 require_once __DIR__ . '/auth_check.php';
@@ -21,13 +22,19 @@ if ($_SERVER['REQUEST_METHOD'] !== 'DELETE') {
 
 $authUser = requireAuth();
 
-$body = json_decode(file_get_contents('php://input'), true);
-if (!is_array($body)) {
-    http_response_code(400);
-    echo json_encode(['error' => 'Invalid JSON body.']);
-    exit;
+// Accept diagramId from query param first, fall back to JSON body.
+// This handles servers/proxies that strip the body on DELETE requests.
+$diagramId = trim($_GET['diagramId'] ?? '');
+
+if ($diagramId === '') {
+    $body = json_decode(file_get_contents('php://input'), true);
+    if (!is_array($body)) {
+        http_response_code(400);
+        echo json_encode(['error' => 'Invalid JSON body.']);
+        exit;
+    }
+    $diagramId = trim($body['diagramId'] ?? '');
 }
-$diagramId = trim($body['diagramId'] ?? '');
 
 if ($diagramId === '') {
     http_response_code(400);
