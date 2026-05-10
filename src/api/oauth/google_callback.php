@@ -7,7 +7,7 @@ setCorsHeaders();
 $clientId     = getenv('GOOGLE_CLIENT_ID');
 $clientSecret = getenv('GOOGLE_CLIENT_SECRET');
 $redirectUri  = getenv('GOOGLE_REDIRECT_URI');
-$appUrl       = getenv('APP_URL');
+$appUrl       = rtrim(getenv('APP_URL'), '/');
 
 // ── Step 1: Exchange code for access token ────────────────────
 $code = $_GET['code'] ?? '';
@@ -29,7 +29,7 @@ $tokenResponse = file_get_contents('https://oauth2.googleapis.com/token', false,
     ],
 ]));
 
-$tokenData = json_decode($tokenResponse, true);
+$tokenData   = json_decode($tokenResponse, true);
 $accessToken = $tokenData['access_token'] ?? '';
 
 if (!$accessToken) {
@@ -44,9 +44,9 @@ $userResponse = file_get_contents('https://www.googleapis.com/oauth2/v2/userinfo
 ]));
 
 $googleUser = json_decode($userResponse, true);
-$email      = $googleUser['email']   ?? '';
-$googleId   = $googleUser['id']      ?? '';
-$name       = $googleUser['name']    ?? '';
+$email      = $googleUser['email'] ?? '';
+$googleId   = $googleUser['id']    ?? '';
+$name       = $googleUser['name']  ?? '';
 
 if (!$email || !$googleId) {
     redirectWithError('Google login failed. Could not get user info.');
@@ -85,55 +85,40 @@ if (!$user) {
     }
 }
 
-// ── Step 4: Issue JWT and redirect back ──────────────────────
+// FIX 1: If the existing user has a blank username (e.g. created before OAuth
+// username generation was added), generate one now and persist it so
+// restoreSession() doesn't reject the JWT for having an empty username claim.
+if (empty($user['username'])) {
+    $fallback = strtolower(preg_replace('/[^a-zA-Z0-9_]/', '_', $name ?: 'user')) . '_' . rand(100, 999);
+    $pdo->prepare('UPDATE users SET username = ? WHERE id = ?')
+        ->execute([$fallback, $user['id']]);
+    $user['username'] = $fallback;
+}
+
+// ── Step 4: Issue JWT ─────────────────────────────────────────
 $payload = [
     'sub'      => $user['id'],
     'email'    => $user['email'],
-    'username' => $user['username'] ?? '',
+    'username' => $user['username'],
     'iat'      => time(),
     'exp'      => time() + (7 * 24 * 60 * 60),
 ];
 $token = jwtEncode($payload);
 
-// Send token back to the opener window via postMessage
-echo "<!DOCTYPE html>
-<html>
-<head><title>Authenticating...</title></head>
-<body>
-<script>
-  if (window.opener) {
-    window.opener.postMessage({
-      type:  'OAUTH_SUCCESS',
-      token: " . json_encode($token) . ",
-      user:  " . json_encode(['uid' => (string)$user['id'], 'email' => $user['email'], 'username' => $user['username'] ?? '']) . "
-    }, " . json_encode($appUrl) . ");
-    window.close();
-  } else {
-    window.location.href = " . json_encode($appUrl) . ";
-  }
-</script>
-</body>
-</html>";
+// FIX 2: Redirect to a frontend page that does the postMessage instead of
+// doing it here. After a cross-domain redirect chain (this domain → Google →
+// this domain), some browsers sever window.opener for security, so
+// postMessage from the API domain never reaches the React app.
+// Redirecting to the frontend domain first restores the opener reference
+// and ensures the message fires from the same origin as the main app.
+$callbackUrl = $appUrl . '/oauth-callback?token=' . urlencode($token);
+header('Location: ' . $callbackUrl);
 exit;
 
 // ── Helper ───────────────────────────────────────────────────
 function redirectWithError($message) {
     global $appUrl;
-    echo "<!DOCTYPE html>
-<html>
-<body>
-<script>
-  if (window.opener) {
-    window.opener.postMessage({
-      type:  'OAUTH_ERROR',
-      error: " . json_encode($message) . "
-    }, " . json_encode($appUrl) . ");
-    window.close();
-  } else {
-    window.location.href = " . json_encode($appUrl) . ";
-  }
-</script>
-</body>
-</html>";
+    $errorUrl = $appUrl . '/oauth-callback?error=' . urlencode($message);
+    header('Location: ' . $errorUrl);
     exit;
 }
