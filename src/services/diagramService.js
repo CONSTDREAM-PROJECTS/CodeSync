@@ -25,6 +25,20 @@
  * BUG 11 — API URLs used folder-style paths (/diagrams/save) but PHP
  *   files are named diagrams_save.php, diagrams_load.php, etc.
  *   FIX: Updated all URLs to match actual PHP filenames.
+ *
+ * FIXES APPLIED (recommended):
+ *
+ * FIX A — API_BASE_URL dev vs prod comment clarification.
+ *   Both branches intentionally point to the live API for now.
+ *   A comment is added so future contributors understand this is deliberate.
+ *
+ * FIX B — autoSave moved outside the class body to avoid relying on
+ *   stage-3 static class field syntax, which can silently break under
+ *   stricter Babel configs.
+ *
+ * FIX C — deleteDiagram switched from request body to query param.
+ *   Some servers/proxies strip the body on DELETE requests, causing
+ *   diagramId to silently go missing on the PHP side.
  * ============================================================
  */
 
@@ -32,6 +46,11 @@ export const TOKEN_KEY = 'codesynch_token';
 
 // ─────────────────────────────────────────────────────────────
 // Configuration — keep in sync with LoginModal.jsx API_BASE_URL
+//
+// NOTE: Both branches intentionally point to the live API.
+// Local dev also hits api.codesynch.tech by design — there is
+// no local PHP server. Change the 'development' value here if
+// you ever spin one up.
 // ─────────────────────────────────────────────────────────────
 
 const API_BASE_URL =
@@ -147,32 +166,39 @@ class DiagramService {
 
   /**
    * deleteDiagram(user, diagramId)
-   * DELETE /diagrams_delete.php
+   * DELETE /diagrams_delete.php?diagramId=xxx
+   *
+   * FIX C: diagramId is now passed as a query param instead of a request
+   * body. Some servers and proxies strip the body on DELETE requests,
+   * which caused diagramId to silently go missing on the PHP side.
    */
   static async deleteDiagram(user, diagramId) {
     if (!user || !_getToken()) return { success: false, error: 'Not logged in.' };
 
     try {
-      await _apiRequest(`${API_BASE_URL}/diagrams_delete.php`, {
-        method:  'DELETE',
-        headers: _authHeaders(),
-        body:    JSON.stringify({ diagramId }),
-      });
+      await _apiRequest(
+        `${API_BASE_URL}/diagrams_delete.php?diagramId=${encodeURIComponent(diagramId)}`,
+        { method: 'DELETE', headers: _authHeaders() }
+      );
       return { success: true, error: null };
     } catch (err) {
       console.error('[DiagramService] deleteDiagram:', err);
       return { success: false, error: err.message };
     }
   }
-
-  /**
-   * autoSave — debounced 2 s wrapper around saveDiagram
-   */
-  static autoSave = _debounce(async (user, diagramId, diagramData) => {
-    if (!user || !_getToken()) return;
-    const result = await DiagramService.saveDiagram(user, diagramId, diagramData);
-    if (!result.success) console.warn('[DiagramService] autoSave failed:', result.error);
-  }, 2000);
 }
+
+/**
+ * autoSave — debounced 2 s wrapper around saveDiagram
+ *
+ * FIX B: Defined outside the class body to avoid relying on static class
+ * field syntax (stage-3 proposal). Older Babel configs may not support it,
+ * causing a silent failure where autoSave is undefined at call sites.
+ */
+DiagramService.autoSave = _debounce(async (user, diagramId, diagramData) => {
+  if (!user || !_getToken()) return;
+  const result = await DiagramService.saveDiagram(user, diagramId, diagramData);
+  if (!result.success) console.warn('[DiagramService] autoSave failed:', result.error);
+}, 2000);
 
 export default DiagramService;
