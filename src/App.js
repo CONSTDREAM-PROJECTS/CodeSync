@@ -2,27 +2,49 @@ import React, { useState, useEffect } from 'react';
 import UMLEditor from './components/UMLEditor';
 import { Menu, Github, Book, ArrowLeft, LogOut, User } from 'lucide-react';
 import LoginModal, { restoreSession, clearSession } from './components/LoginModal';
+import ResetPasswordModal from './components/ResetPasswordModal';
 import AboutPage from './components/AboutPage';
 import ContactPage from './components/ContactPage';
 import OAuthCallback from './components/OAuthCallback';
 import './App.css';
 
+// ─────────────────────────────────────────────────────────────
+// Read the reset token ONCE at module load time, before any
+// React state or effects can race.  Works whether the link is:
+//   https://yoursite.com/?token=abc
+//   https://yoursite.com/reset-password?token=abc
+// ─────────────────────────────────────────────────────────────
+const _initialParams = new URLSearchParams(window.location.search);
+const _initialToken  = _initialParams.get('token') || null;
+
+// Immediately clean the token from the address bar so a hard
+// refresh after a successful reset doesn't re-open the modal.
+if (_initialToken) {
+  window.history.replaceState({}, document.title, window.location.pathname);
+}
+
 function App() {
-  const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [showLogin, setShowLogin] = useState(false);
-  const [currentUser, setCurrentUser] = useState(null);
+  const [sidebarOpen,     setSidebarOpen]     = useState(false);
+  const [showLogin,       setShowLogin]       = useState(false);
+  const [currentUser,     setCurrentUser]     = useState(null);
   const [isTransitioning, setIsTransitioning] = useState(false);
 
-  // Detect /oauth-callback path on initial load so the popup
-  // renders OAuthCallback instead of the full editor.
+  // Initialise from the value we grabbed at module load time.
+  // This is always set before the first render, so the modal
+  // will appear on the very first paint.
+  const [resetToken, setResetToken] = useState(_initialToken);
+
+  // ── Page routing ─────────────────────────────────────────
   const [currentPage, setCurrentPage] = useState(() => {
     if (window.location.pathname === '/oauth-callback') return 'oauth-callback';
     return 'home';
   });
 
-  // Restore logged-in session on page load
+  // Restore logged-in session on page load (skip if a reset
+  // token is present — the user is not trying to log in yet).
   useEffect(() => {
-    if (currentPage === 'oauth-callback') return; // skip for popup
+    if (currentPage === 'oauth-callback') return;
+    if (resetToken) return; // don't auto-login over a reset flow
     const user = restoreSession();
     if (user) setCurrentUser(user);
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
@@ -37,8 +59,6 @@ function App() {
 
   const goBack = () => navigateTo('home');
 
-  // Centralized logout — uses clearSession() so TOKEN_KEY stays
-  // as the single source of truth from diagramService.js.
   const handleLogout = () => {
     clearSession();
     setCurrentUser(null);
@@ -50,8 +70,13 @@ function App() {
     setShowLogin(false);
   };
 
-  // Render only the OAuth callback handler for the popup window —
-  // no nav, no footer, no editor.
+  // After a successful reset the modal calls onClose — dismiss
+  // the modal and open the login modal so the user can sign in.
+  const handleResetClose = () => {
+    setResetToken(null);
+    setShowLogin(true);
+  };
+
   if (currentPage === 'oauth-callback') {
     return <OAuthCallback />;
   }
@@ -186,10 +211,20 @@ function App() {
         </div>
       )}
 
-      {showLogin && (
+      {/* Login Modal — never shown while a reset token is active */}
+      {showLogin && !resetToken && (
         <LoginModal
           onClose={() => setShowLogin(false)}
           onLoginSuccess={handleLoginSuccess}
+        />
+      )}
+
+      {/* Reset Password Modal — shown automatically when the
+          user opens the reset link from their email */}
+      {resetToken && (
+        <ResetPasswordModal
+          token={resetToken}
+          onClose={handleResetClose}
         />
       )}
     </div>
