@@ -233,8 +233,10 @@ const UMLEditor = ({ currentUser, onLoginSuccess, onLogout }) => {
    *   changes are collapsed into one save. Depends on elements, connections,
    *   selectedDiagram, language, and currentUser.
    */
-  // BUG M6 FIX: Only depend on elements/connections so a diagram-type or
-  // language switch doesn't trigger a spurious save of an unchanged canvas.
+  // BUG M6 FIX (revised): include all values read inside the effect so the
+  // saved payload always reflects the current diagram type and language.
+  // Previously selectedDiagram, language, and diagramId were omitted, causing
+  // the effect to close over stale values whenever those changed.
   useEffect(() => {
     if (!currentUser) return;
     if (elements.length === 0 && connections.length === 0) return;
@@ -245,7 +247,7 @@ const UMLEditor = ({ currentUser, onLoginSuccess, onLogout }) => {
       elements,
       connections
     });
-  }, [elements, connections]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [elements, connections, selectedDiagram, language, diagramId, currentUser]); // eslint-disable-line react-hooks/exhaustive-deps
 
   /**
    * copyElement()
@@ -951,11 +953,13 @@ const UMLEditor = ({ currentUser, onLoginSuccess, onLogout }) => {
    *   Note: the history save uses the pre-merge elements/connections due to
    *   closure capture — a known minor quirk that doesn't affect correctness.
    */
-  const handleImportCode = (importedElements, importedConnections) => {
+  const handleImportCode = (importedElements, importedConnections, options = {}) => {
     let mergedElements;
     let mergedConnections;
 
-    if (elements.length === 0 && connections.length === 0) {
+    // replaceAll: true is set by CodeToUMLConverter when importing fresh code
+    // so stale placeholder elements don't remain alongside newly-imported ones.
+    if (options.replaceAll || elements.length === 0 && connections.length === 0) {
       mergedElements    = importedElements;
       mergedConnections = importedConnections;
     } else {
@@ -1273,7 +1277,108 @@ const UMLEditor = ({ currentUser, onLoginSuccess, onLogout }) => {
                 <marker id="realization" markerWidth="15" markerHeight="15" refX="13" refY="5" orient="auto">
                   <polygon points="0 0, 13 5, 0 10, 0 0" fill="none" stroke="#cccccc" strokeWidth="1.5" />
                 </marker>
+                {/* Sequence diagram arrow markers */}
+                <marker id="seq-arrow" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto">
+                  <polygon points="0 0, 10 3, 0 6" fill="#e0a030" />
+                </marker>
+                <marker id="seq-return" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto">
+                  <polygon points="0 0, 10 3, 0 6" fill="#888888" />
+                </marker>
               </defs>
+
+              {/* ── Sequence Diagram Layer: stems, activation boxes, ordered arrows ── */}
+              {selectedDiagram === 'sequence' && (() => {
+                const lifelines = elements.filter(e => e.type === 'lifeline' || e.type === 'actor');
+                if (lifelines.length === 0) return null;
+                const HEADER_H = 60;
+                const HEADER_W = 150;
+                const MSG_START_Y = 200;
+                const MSG_GAP = 60;
+                const STEM_EXTRA = 80;
+                const ACT_W = 14;
+                const ACT_HALF = ACT_W / 2;
+                const seqConns = connections.filter(c => {
+                  const f = elements.find(e => e.id === c.from);
+                  const t = elements.find(e => e.id === c.to);
+                  return f && t && (f.type === 'lifeline' || f.type === 'actor') && (t.type === 'lifeline' || t.type === 'actor');
+                });
+                const totalMsgs = seqConns.length;
+                const stemBottom = MSG_START_Y + totalMsgs * MSG_GAP + STEM_EXTRA;
+                const centreX = {};
+                lifelines.forEach(ll => { centreX[ll.id] = ll.x + (ll.width || HEADER_W) / 2; });
+                const activeIds = new Set();
+                seqConns.forEach(c => { activeIds.add(c.from); activeIds.add(c.to); });
+                const activationRange = {};
+                seqConns.forEach((c, i) => {
+                  const y = MSG_START_Y + i * MSG_GAP;
+                  [c.from, c.to].forEach(id => {
+                    if (!activationRange[id]) activationRange[id] = { min: y, max: y };
+                    else { activationRange[id].min = Math.min(activationRange[id].min, y); activationRange[id].max = Math.max(activationRange[id].max, y); }
+                  });
+                });
+                return (
+                  <g key="seq-layer">
+                    {lifelines.map(ll => {
+                      const cx = centreX[ll.id] || (ll.x + HEADER_W / 2);
+                      return (
+                        <line key={"stem-" + ll.id}
+                          x1={cx} y1={ll.y + HEADER_H} x2={cx} y2={stemBottom}
+                          stroke="#4a6080" strokeWidth="1.5" strokeDasharray="6,4" />
+                      );
+                    })}
+                    {lifelines.map(ll => {
+                      if (!activeIds.has(ll.id)) return null;
+                      const cx = centreX[ll.id] || (ll.x + HEADER_W / 2);
+                      const rng = activationRange[ll.id];
+                      if (!rng) return null;
+                      return (
+                        <rect key={"act-" + ll.id}
+                          x={cx - ACT_HALF} y={rng.min - 10}
+                          width={ACT_W} height={(rng.max - rng.min) + 20}
+                          fill="#e0a030" fillOpacity="0.85" stroke="#c07010" strokeWidth="1" rx="2" />
+                      );
+                    })}
+                    {seqConns.map((conn, i) => {
+                      const fromEl = elements.find(e => e.id === conn.from);
+                      const toEl   = elements.find(e => e.id === conn.to);
+                      if (!fromEl || !toEl) return null;
+                      const isReturn   = conn.type === 'return';
+                      const arrowY     = MSG_START_Y + i * MSG_GAP;
+                      const x1         = centreX[conn.from] || (fromEl.x + fromEl.width / 2);
+                      const x2         = centreX[conn.to]   || (toEl.x   + toEl.width   / 2);
+                      const isSelected = selectedConnection && selectedConnection.id === conn.id;
+                      const xDir = x2 > x1 ? 1 : -1;
+                      const ax1  = x1 + xDir * ACT_HALF;
+                      const ax2  = x2 - xDir * ACT_HALF;
+                      const stroke    = isReturn ? '#888888' : (isSelected ? '#007acc' : '#e0e0e0');
+                      const dashArray = isReturn ? '6,4' : 'none';
+                      const markerEnd = isReturn ? 'url(#seq-return)' : 'url(#seq-arrow)';
+                      return (
+                        <g key={conn.id}>
+                          <line x1={ax1} y1={arrowY} x2={ax2} y2={arrowY}
+                            stroke={stroke} strokeWidth={isSelected ? 3 : 1.5}
+                            strokeDasharray={dashArray} markerEnd={markerEnd}
+                            onClick={(e) => { e.stopPropagation(); setSelectedConnection(conn); setSelectedElements([]); }}
+                            style={{ cursor: 'pointer' }} />
+                          <line x1={ax1} y1={arrowY} x2={ax2} y2={arrowY}
+                            stroke="transparent" strokeWidth="12"
+                            onClick={(e) => { e.stopPropagation(); setSelectedConnection(conn); setSelectedElements([]); }}
+                            style={{ cursor: 'pointer' }} />
+                          <text x={(ax1 + ax2) / 2} y={arrowY - 8}
+                            fill={isReturn ? '#888888' : '#e0e0e0'} fontSize="11" textAnchor="middle"
+                            fontStyle={isReturn ? 'italic' : 'normal'}>
+                            {conn.label}
+                          </text>
+                          <text x={Math.min(ax1, ax2) + 8} y={arrowY - 8}
+                            fill="#607090" fontSize="9" textAnchor="start">
+                            {i + 1}.
+                          </text>
+                        </g>
+                      );
+                    })}
+                  </g>
+                );
+              })()}
 
               {/* Render Connections/Relationships */}
               {connections.map(conn => {
@@ -1904,8 +2009,35 @@ const UMLEditor = ({ currentUser, onLoginSuccess, onLogout }) => {
                     </>
                   )}
 
+                  {/* Sequence Diagram: Lifeline header box (stem + activation rendered in seq-layer above) */}
+                  {element.type === 'lifeline' && (() => {
+                    const isSelected = selectedElements.some(el => el.id === element.id);
+                    const cx = element.x + (element.width || 150) / 2;
+                    const BOX_W = element.width || 150;
+                    const BOX_H = 60;
+                    return (
+                      <>
+                        {/* Header box */}
+                        <rect
+                          x={element.x} y={element.y}
+                          width={BOX_W} height={BOX_H}
+                          fill="#1a3a5c"
+                          stroke={isSelected ? '#007acc' : '#2a5a8c'}
+                          strokeWidth={isSelected ? 2 : 1.5}
+                          rx="4"
+                        />
+                        {/* Name label — word-wrapped via two lines if needed */}
+                        <text x={cx} y={element.y + BOX_H / 2 - 2}
+                          fill="white" fontSize="13" fontWeight="bold"
+                          textAnchor="middle" dominantBaseline="middle">
+                          {element.name}
+                        </text>
+                      </>
+                    );
+                  })()}
+
                   {/* Generic Rectangle for other types */}
-                  {!['class', 'interface', 'abstract', 'enum', 'object', 'component', 'package', 'usecase', 'actor'].includes(element.type) && (
+                  {!['class', 'interface', 'abstract', 'enum', 'object', 'component', 'package', 'usecase', 'actor', 'lifeline'].includes(element.type) && (
                     <>
                       <rect
                         x={element.x}

@@ -276,18 +276,19 @@ class ValidationService {
       .filter(t => t.tokenType === TOKEN_TYPES.ATTRIBUTE)
       .forEach(token => {
         const type = token.attributes?.type;
-        if (!type || !type.trim() || (type.trim() === 'Object' && !token.attributes._typeWasExplicit)) {
-          // We only warn here if type is completely absent (Object is a valid fallback)
-          if (!type || !type.trim()) {
-            errors.push(this._issue(
-              SEVERITY.ERROR,
-              'MISSING_ATTRIBUTE_TYPE',
-              token.id,
-              `Attribute '${token.name}' in class '${token.parentClass}' has no data type`,
-              `The attribute '${token.name}' in class '${token.parentClass}' does not have an assigned data type. All attributes must specify a type (e.g., String, int, Boolean).`,
-              `Open the properties panel for '${token.parentClass}' and assign a type to the '${token.name}' attribute.`
-            ));
-          }
+        // Only error when the type field is completely absent or empty.
+        // If _typeWasExplicit is true the user set a real type (even 'Object').
+        // If the type is non-empty (e.g. 'Object' as fallback) but _typeWasExplicit
+        // is false, we still don't hard-error — the generator handles the fallback.
+        if (!type || !type.trim()) {
+          errors.push(this._issue(
+            SEVERITY.ERROR,
+            'MISSING_ATTRIBUTE_TYPE',
+            token.id,
+            `Attribute '${token.name}' in class '${token.parentClass}' has no data type`,
+            `The attribute '${token.name}' in class '${token.parentClass}' does not have an assigned data type. All attributes must specify a type (e.g., String, int, Boolean).`,
+            `Open the properties panel for '${token.parentClass}' and assign a type to the '${token.name}' attribute.`
+          ));
         }
       });
 

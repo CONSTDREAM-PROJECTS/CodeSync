@@ -263,9 +263,35 @@ class TokenizationService {
     });
 
     // Pass 2: connection edges
+    // BUG FIX — sequence diagram message/return connections were being
+    // classified as RELATIONSHIP because 'message' and 'return' are in
+    // KNOWN_RELATIONSHIP_TYPES. This caused two cascading failures:
+    //   (a) ValidationService._structuralValidation() checked whether the
+    //       lifeline names existed in the symbol table (which only contains
+    //       CLASS_DEF, ACTOR, USE_CASE entries) → 8 false-positive errors.
+    //   (b) The MESSAGE token bucket stayed empty so every lifeline was
+    //       flagged as "has no messages" by completeness validation.
+    // Fix: if both endpoints of the connection are lifeline or actor elements,
+    // AND the connection type is 'message' or 'return', classify it as MESSAGE.
+    const lifelineElementIds = new Set(
+      elements
+        .filter(e => e.type === 'lifeline' || e.type === 'actor')
+        .map(e => e.id)
+    );
+
     connections.forEach((conn, idx) => {
-      const isKnownRel = KNOWN_RELATIONSHIP_TYPES.has(conn.type?.toLowerCase());
-      const tokenType  = isKnownRel ? TOKEN_TYPES.RELATIONSHIP : TOKEN_TYPES.UNKNOWN;
+      const connTypeLower = conn.type?.toLowerCase();
+      // Reclassify as MESSAGE when both endpoints are sequence participants
+      const isSequenceMsg = (connTypeLower === 'message' || connTypeLower === 'return') &&
+                            lifelineElementIds.has(conn.from) &&
+                            lifelineElementIds.has(conn.to);
+      let tokenType;
+      if (isSequenceMsg) {
+        tokenType = TOKEN_TYPES.MESSAGE;
+      } else {
+        const isKnownRel = KNOWN_RELATIONSHIP_TYPES.has(connTypeLower);
+        tokenType = isKnownRel ? TOKEN_TYPES.RELATIONSHIP : TOKEN_TYPES.UNKNOWN;
+      }
       rawTokens.push({
         tokenType,
         id:           conn.id || `conn_${idx}`,
@@ -434,13 +460,18 @@ class TokenizationService {
    * Extracts ATTRIBUTE token fields: name, type, visibility, default.
    */
   static _extractAttributeAttributes(attr) {
+    const resolvedType = attr.type || '';
     return {
-      name:         attr.name || '',
-      type:         attr.type || 'Object',
-      visibility:   attr.visibility || 'private',
-      defaultValue: attr.defaultValue ?? attr.default ?? null,
-      isStatic:     attr.isStatic || false,
-      isFinal:      attr.isFinal  || false
+      name:             attr.name || '',
+      type:             resolvedType || 'Object',
+      // _typeWasExplicit: true when the user set a real type (even 'Object').
+      // false when we fell back to 'Object' because type was absent.
+      // ValidationService uses this to avoid false-positive MISSING_ATTRIBUTE_TYPE errors.
+      _typeWasExplicit: resolvedType.trim().length > 0,
+      visibility:       attr.visibility || 'private',
+      defaultValue:     attr.defaultValue ?? attr.default ?? null,
+      isStatic:         attr.isStatic || false,
+      isFinal:          attr.isFinal  || false
     };
   }
 
@@ -564,11 +595,15 @@ class TokenizationService {
     // checks RELATIONSHIP endpoints against the symbol table. Without
     // this, every association in a use case diagram fires a false-positive
     // "Relationship references undefined class 'X'" error (BUG FIX).
+    // BUG FIX: LIFELINE tokens are now also registered so that any
+    // residual RELATIONSHIP tokens whose endpoints are lifeline names
+    // can be resolved without firing false-positive validation errors.
     tokenStream
       .filter(t =>
         t.tokenType === TOKEN_TYPES.CLASS_DEF ||
         t.tokenType === TOKEN_TYPES.ACTOR     ||
-        t.tokenType === TOKEN_TYPES.USE_CASE
+        t.tokenType === TOKEN_TYPES.USE_CASE  ||
+        t.tokenType === TOKEN_TYPES.LIFELINE
       )
       .forEach(token => {
         symbolTable.set(token.name, {

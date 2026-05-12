@@ -203,10 +203,34 @@ class CodeGenerator {
       files.push({ filename: this.getFileName('UseCaseHandler', language),
                    content: this.generateUseCaseHandler(els, conns, language) });
     } else if (diagramType === 'sequence') {
+      // Documentation file
       files.push({ filename: 'SequenceFlow.md',
                    content: this.generateSequenceDocumentation(els, conns) });
-      files.push({ filename: this.getFileName('SequenceHandler', language),
-                   content: this.generateSequenceCode(els, conns, language) });
+
+      // FIX 2+7: emit one file per lifeline class instead of one combined
+      // SequenceHandler.java — Java requires one public class per file.
+      // Also emit the Runner class as its own file.
+      if (language === 'Java') {
+        // Re-run the generator to get the full text, then split on class boundaries
+        const fullCode = this.generateSequenceCode(els, conns, language);
+        // Split on lines starting with "public class " or "// ── Runner"
+        const classBlocks = fullCode.split(/(?=public class \w)/);
+        // The first block is the package+javadoc header — attach it to each class
+        const header = 'package com.example.sequences;\n\n';
+        classBlocks.forEach(block => {
+          const classMatch = block.match(/public class (\w+)/);
+          if (!classMatch) return;
+          const className = classMatch[1];
+          files.push({
+            filename: `${className}.java`,
+            content:  header + block.trim() + "\n"
+          });
+        });
+      } else {
+        // Python and JS: one combined file is idiomatic (modules, not one-class-per-file)
+        files.push({ filename: this.getFileName('sequence_handler', language),
+                     content: this.generateSequenceCode(els, conns, language) });
+      }
     }
 
     return files.length > 0 ? files : [{ filename: 'Generated.txt', content: '// Nothing to generate.' }];
@@ -922,103 +946,352 @@ class CodeGenerator {
   // ─────────────────────────────────────────────────────────
 
   static generateUseCaseDiagramCode(elements, connections, language) {
-    let code = '';
-    code += this.generateUseCaseHandler(elements, connections, language);
-    return code;
+    return this.generateUseCaseHandler(elements, connections, language);
   }
 
+  /**
+   * generateUseCaseHandler(elements, connections, language)
+   * ─────────────────────────────────────────────────────────
+   * WHAT CHANGED (v2):
+   *   Old: emitted one flat UseCaseHandler class with every use case as a
+   *        method stub. Actors, associations, and include/extend relationships
+   *        were completely ignored — the output had no access control, no
+   *        delegation, and no wiring between related use cases.
+   *
+   *   New: emits one class PER ACTOR containing only the use cases that actor
+   *        is directly associated with. Include relationships are wired as
+   *        internal method calls (mandatory delegation). Extend relationships
+   *        are wired as guarded optional calls. A shared UseCaseHandler base
+   *        class holds use cases reachable only via include/extend (not directly
+   *        tied to any actor) so nothing is lost.
+   *
+   * ALGORITHM:
+   *   1. Build a map: actorId → Set<useCaseId> from association connections.
+   *   2. Build include map:  ucId → [ucId]  (mandatory sub-calls).
+   *   3. Build extend map:   ucId → [ucId]  (optional extension calls).
+   *   4. Emit one class per actor with only its associated use-case methods,
+   *      each method body calling its includes and optionally its extensions.
+   *   5. Emit a shared UseCaseHandler for any use cases not directly owned
+   *      by an actor (only reachable via include/extend from another use case).
+   *   6. Emit a Runner/main that instantiates all actor classes and exercises them.
+   */
   static generateUseCaseHandler(elements, connections, language) {
+    const actors   = elements.filter(e => e.type === 'actor');
     const usecases = elements.filter(e => e.type === 'usecase');
+
     if (usecases.length === 0) {
       return language === 'Python'
         ? '# No use cases defined\npass\n'
         : '// No use cases defined\n';
     }
 
-    // BUG FIX: normalizeIdentifier() strips ALL non-alphanumeric characters before
-    // capitalising, so "Search docs full text" collapsed to "Searchdocsfulltext".
-    // Use-case names are multi-word phrases — they need word-boundary camelCase,
-    // not character stripping. toCamelCase() splits on spaces/special chars,
-    // capitalises each word, and joins — producing "searchDocsFullText" which is
-    // readable and follows standard Java/JS naming conventions.
-    const toCamelCase = (phrase) => {
-      const words = phrase.trim().split(/[\s_\-]+/);
-      return words
+    // ── Naming helpers ──────────────────────────────────────
+    const toCamelCase = (phrase) =>
+      phrase.trim().split(/[\s_\-]+/)
         .map((w, i) => {
-          // Strip any remaining non-alphanumeric characters from each word
-          const clean = w.replace(/[^a-zA-Z0-9]/g, '');
-          if (!clean) return '';
+          const c = w.replace(/[^a-zA-Z0-9]/g, '');
+          if (!c) return '';
           return i === 0
-            ? clean.charAt(0).toLowerCase() + clean.slice(1)
-            : clean.charAt(0).toUpperCase() + clean.slice(1);
+            ? c.charAt(0).toLowerCase() + c.slice(1)
+            : c.charAt(0).toUpperCase() + c.slice(1);
         })
         .join('');
+
+    const toPascalCase = (phrase) => {
+      const cc = toCamelCase(phrase);
+      return cc.charAt(0).toUpperCase() + cc.slice(1);
     };
 
+    const toSnakeCase = (phrase) =>
+      phrase.trim().toLowerCase().replace(/[\s\-]+/g, '_').replace(/[^a-z0-9_]/g, '');
+
+    const toClassName = (name) =>
+      name.trim().split(/[\s_\-]+/)
+        .map(w => { const c = w.replace(/[^a-zA-Z0-9]/g, ''); return c.charAt(0).toUpperCase() + c.slice(1); })
+        .join('');
+
+    // ── Step 1: actor → directly-associated use cases ───────
+    const actorUcIds = new Map(); // actorId → Set<ucId>
+    actors.forEach(a => actorUcIds.set(a.id, new Set()));
+
+    connections
+      .filter(c => c.type === 'association')
+      .forEach(c => {
+        const fromEl = elements.find(e => e.id === c.from);
+        const toEl   = elements.find(e => e.id === c.to);
+        // association can be actor→uc or uc→actor
+        if (fromEl?.type === 'actor' && toEl?.type === 'usecase') {
+          actorUcIds.get(fromEl.id)?.add(toEl.id);
+        } else if (toEl?.type === 'actor' && fromEl?.type === 'usecase') {
+          actorUcIds.get(toEl.id)?.add(fromEl.id);
+        }
+      });
+
+    // ── Step 2: include map  ucId → [ucId] ──────────────────
+    const includeMap = new Map(); // ucId → [target ucId]
+    usecases.forEach(uc => includeMap.set(uc.id, []));
+    connections
+      .filter(c => c.type === 'include' || c.label?.toLowerCase().includes('include'))
+      .forEach(c => {
+        if (includeMap.has(c.from)) includeMap.get(c.from).push(c.to);
+      });
+
+    // ── Step 3: extend map  ucId → [ucId] ───────────────────
+    const extendMap = new Map(); // ucId → [extension ucId]
+    usecases.forEach(uc => extendMap.set(uc.id, []));
+    connections
+      .filter(c => c.type === 'extend' || c.label?.toLowerCase().includes('extend'))
+      .forEach(c => {
+        // extend arrow points FROM the extension TO the base use case
+        // we want: baseUcId → [extensionUcId]
+        if (extendMap.has(c.to)) extendMap.get(c.to).push(c.from);
+      });
+
+    // ── Step 4: shared use cases (included/extended only, no direct actor) ──
+    const actorOwnedIds = new Set([...actorUcIds.values()].flatMap(s => [...s]));
+    const sharedUcs = usecases.filter(uc => !actorOwnedIds.has(uc.id));
+
+    // ── Emit helpers per language ────────────────────────────
+
+    const emitJavaMethod = (uc, indent = '    ') => {
+      const mC = toPascalCase(uc.name);
+      const includes = (includeMap.get(uc.id) || [])
+        .map(id => elements.find(e => e.id === id))
+        .filter(Boolean);
+      const extensions = (extendMap.get(uc.id) || [])
+        .map(id => elements.find(e => e.id === id))
+        .filter(Boolean);
+
+      let m = `${indent}/**\n${indent} * Execute use case: ${uc.name}\n`;
+      if (includes.length)   m += `${indent} * Includes: ${includes.map(u => u.name).join(', ')}\n`;
+      if (extensions.length) m += `${indent} * Extended by: ${extensions.map(u => u.name).join(', ')}\n`;
+      m += `${indent} */\n`;
+      m += `${indent}public boolean execute${mC}() {\n`;
+      // wire mandatory includes
+      includes.forEach(inc => {
+        const shared = sharedUcs.find(s => s.id === inc.id);
+        const prefix = shared ? 'handler.' : 'this.';
+        m += `${indent}    ${prefix}execute${toPascalCase(inc.name)}(); // <<include>>\n`;
+      });
+      // wire optional extensions
+      extensions.forEach(ext => {
+        const shared = sharedUcs.find(s => s.id === ext.id);
+        const prefix = shared ? 'handler.' : 'this.';
+        m += `${indent}    // <<extend>> — call conditionally based on your business logic\n`;
+        m += `${indent}    // ${prefix}execute${toPascalCase(ext.name)}();\n`;
+      });
+      m += `${indent}    // TODO: implement "${uc.name}"\n`;
+      m += `${indent}    return true;\n`;
+      m += `${indent}}\n\n`;
+      return m;
+    };
+
+    const emitPythonMethod = (uc, indent = '    ') => {
+      const ms = toSnakeCase(uc.name);
+      const includes = (includeMap.get(uc.id) || [])
+        .map(id => elements.find(e => e.id === id))
+        .filter(Boolean);
+      const extensions = (extendMap.get(uc.id) || [])
+        .map(id => elements.find(e => e.id === id))
+        .filter(Boolean);
+
+      let m = `${indent}def execute_${ms}(self) -> bool:\n`;
+      m += `${indent}    """Execute use case: ${uc.name}`;
+      if (includes.length)   m += ` | includes: ${includes.map(u => u.name).join(', ')}`;
+      if (extensions.length) m += ` | extended by: ${extensions.map(u => u.name).join(', ')}`;
+      m += `"""\n`;
+      includes.forEach(inc => {
+        const shared = sharedUcs.find(s => s.id === inc.id);
+        const prefix = shared ? 'self.handler.' : 'self.';
+        m += `${indent}    ${prefix}execute_${toSnakeCase(inc.name)}()  # <<include>>\n`;
+      });
+      extensions.forEach(ext => {
+        const shared = sharedUcs.find(s => s.id === ext.id);
+        const prefix = shared ? 'self.handler.' : 'self.';
+        m += `${indent}    # <<extend>> — call conditionally based on your business logic\n`;
+        m += `${indent}    # ${prefix}execute_${toSnakeCase(ext.name)}()\n`;
+      });
+      m += `${indent}    # TODO: implement "${uc.name}"\n`;
+      m += `${indent}    return True\n\n`;
+      return m;
+    };
+
+    const emitJSMethod = (uc, indent = '    ') => {
+      const mC = toPascalCase(uc.name);
+      const includes = (includeMap.get(uc.id) || [])
+        .map(id => elements.find(e => e.id === id))
+        .filter(Boolean);
+      const extensions = (extendMap.get(uc.id) || [])
+        .map(id => elements.find(e => e.id === id))
+        .filter(Boolean);
+
+      let m = `${indent}/** Execute use case: ${uc.name}`;
+      if (includes.length)   m += ` | includes: ${includes.map(u => u.name).join(', ')}`;
+      if (extensions.length) m += ` | extended by: ${extensions.map(u => u.name).join(', ')}`;
+      m += ` */\n`;
+      m += `${indent}execute${mC}() {\n`;
+      includes.forEach(inc => {
+        const shared = sharedUcs.find(s => s.id === inc.id);
+        const prefix = shared ? 'this.handler.' : 'this.';
+        m += `${indent}    ${prefix}execute${toPascalCase(inc.name)}(); // <<include>>\n`;
+      });
+      extensions.forEach(ext => {
+        const shared = sharedUcs.find(s => s.id === ext.id);
+        const prefix = shared ? 'this.handler.' : 'this.';
+        m += `${indent}    // <<extend>> — call conditionally based on your business logic\n`;
+        m += `${indent}    // ${prefix}execute${toPascalCase(ext.name)}();\n`;
+      });
+      m += `${indent}    // TODO: implement "${uc.name}"\n`;
+      m += `${indent}    return true;\n`;
+      m += `${indent}}\n\n`;
+      return m;
+    };
+
+    // ── Emit ────────────────────────────────────────────────
     let code = '';
 
     if (language === 'Java') {
-      code += 'package com.example.usecases;\n\n';
-      code += '/**\n * Auto-generated Use Case Handler.\n */\n';
-      code += 'public class UseCaseHandler {\n\n';
-      usecases.forEach(uc => {
-        const m  = toCamelCase(uc.name);
-        const mC = m.charAt(0).toUpperCase() + m.slice(1);
-        code += `    /**\n     * Execute use case: ${uc.name}\n     */\n`;
-        code += `    public boolean execute${mC}() {\n`;
-        code += `        // TODO: implement "${uc.name}"\n`;
-        code += '        return true;\n';
-        code += '    }\n\n';
+      const hasShared = sharedUcs.length > 0;
+
+      // Shared handler (use cases not directly owned by any actor)
+      if (hasShared) {
+        code += 'package com.example.usecases;\n\n';
+        code += '/**\n * Shared use cases reached only via <<include>> or <<extend>>.\n */\n';
+        code += 'public class UseCaseHandler {\n\n';
+        sharedUcs.forEach(uc => { code += emitJavaMethod(uc); });
+        code += '}\n\n';
+      }
+
+      // One class per actor
+      actors.forEach(actor => {
+        const ownedIds = actorUcIds.get(actor.id) || new Set();
+        const ownedUcs = usecases.filter(uc => ownedIds.has(uc.id));
+        const className = toClassName(actor.name);
+
+        code += 'package com.example.usecases;\n\n';
+        code += `/**\n * Use cases accessible by actor: ${actor.name}\n */\n`;
+        code += `public class ${className} {\n\n`;
+
+        if (hasShared) {
+          code += '    private final UseCaseHandler handler = new UseCaseHandler();\n\n';
+        }
+
+        if (ownedUcs.length === 0) {
+          code += '    // No use cases directly associated with this actor\n\n';
+        } else {
+          ownedUcs.forEach(uc => { code += emitJavaMethod(uc); });
+        }
+
+        code += '}\n\n';
       });
-      code += '    // ── Entry point ───────────────────────────────────\n';
+
+      // Runner
+      code += 'package com.example.usecases;\n\n';
+      code += '/** Runner — exercises all actor use cases. */\n';
+      code += 'public class UseCaseRunner {\n';
       code += '    public static void main(String[] args) {\n';
-      code += '        UseCaseHandler handler = new UseCaseHandler();\n';
-      usecases.forEach(uc => {
-        const m  = toCamelCase(uc.name);
-        const mC = m.charAt(0).toUpperCase() + m.slice(1);
-        code += `        System.out.println("${uc.name}: " + handler.execute${mC}());\n`;
+      actors.forEach(actor => {
+        const ownedIds = actorUcIds.get(actor.id) || new Set();
+        const ownedUcs = usecases.filter(uc => ownedIds.has(uc.id));
+        const className = toClassName(actor.name);
+        const varName   = toCamelCase(actor.name);
+        code += `        ${className} ${varName} = new ${className}();\n`;
+        ownedUcs.forEach(uc => {
+          code += `        System.out.println("${actor.name} → ${uc.name}: " + ${varName}.execute${toPascalCase(uc.name)}());\n`;
+        });
       });
       code += '    }\n';
       code += '}\n';
 
     } else if (language === 'Python') {
-      code += 'class UseCaseHandler:\n';
-      code += '    """Auto-generated Use Case Handler."""\n\n';
-      usecases.forEach(uc => {
-        // Python convention: snake_case
-        const m = uc.name.trim().toLowerCase().replace(/[\s\-]+/g, '_').replace(/[^a-z0-9_]/g, '');
-        code += `    def execute_${m}(self) -> bool:\n`;
-        code += `        """Execute use case: ${uc.name}\"\"\"\n`;
-        code += `        # TODO: implement "${uc.name}"\n`;
-        code += '        return True\n\n';
+      const hasShared = sharedUcs.length > 0;
+
+      if (hasShared) {
+        code += 'class UseCaseHandler:\n';
+        code += '    """Shared use cases reached only via <<include>> or <<extend>>."""\n\n';
+        sharedUcs.forEach(uc => { code += emitPythonMethod(uc); });
+        code += '\n\n';
+      }
+
+      actors.forEach(actor => {
+        const ownedIds = actorUcIds.get(actor.id) || new Set();
+        const ownedUcs = usecases.filter(uc => ownedIds.has(uc.id));
+        const className = toClassName(actor.name);
+
+        code += `class ${className}:\n`;
+        code += `    """Use cases accessible by actor: ${actor.name}"""\n\n`;
+        if (hasShared) {
+          code += '    def __init__(self):\n';
+          code += '        self.handler = UseCaseHandler()\n\n';
+        }
+        if (ownedUcs.length === 0) {
+          code += '    pass  # No use cases directly associated with this actor\n\n';
+        } else {
+          ownedUcs.forEach(uc => { code += emitPythonMethod(uc); });
+        }
+        code += '\n';
       });
+
       code += '\nif __name__ == "__main__":\n';
-      code += '    handler = UseCaseHandler()\n';
-      usecases.forEach(uc => {
-        const m = uc.name.trim().toLowerCase().replace(/[\s\-]+/g, '_').replace(/[^a-z0-9_]/g, '');
-        code += `    print("${uc.name}:", handler.execute_${m}())\n`;
+      actors.forEach(actor => {
+        const ownedIds = actorUcIds.get(actor.id) || new Set();
+        const ownedUcs = usecases.filter(uc => ownedIds.has(uc.id));
+        const varName  = toSnakeCase(actor.name);
+        const className = toClassName(actor.name);
+        code += `    ${varName} = ${className}()\n`;
+        ownedUcs.forEach(uc => {
+          code += `    print("${actor.name} → ${uc.name}:", ${varName}.execute_${toSnakeCase(uc.name)}())\n`;
+        });
       });
 
     } else if (language === 'JavaScript') {
-      code += '/**\n * Auto-generated Use Case Handler.\n */\n';
-      code += 'class UseCaseHandler {\n\n';
-      usecases.forEach(uc => {
-        const m  = toCamelCase(uc.name);
-        const mC = m.charAt(0).toUpperCase() + m.slice(1);
-        code += `    /** Execute use case: ${uc.name} */\n`;
-        code += `    execute${mC}() {\n`;
-        code += `        // TODO: implement "${uc.name}"\n`;
-        code += '        return true;\n';
-        code += '    }\n\n';
+      const hasShared = sharedUcs.length > 0;
+
+      if (hasShared) {
+        code += '/** Shared use cases reached only via <<include>> or <<extend>>. */\n';
+        code += 'class UseCaseHandler {\n\n';
+        sharedUcs.forEach(uc => { code += emitJSMethod(uc); });
+        code += '}\n\n';
+      }
+
+      actors.forEach(actor => {
+        const ownedIds = actorUcIds.get(actor.id) || new Set();
+        const ownedUcs = usecases.filter(uc => ownedIds.has(uc.id));
+        const className = toClassName(actor.name);
+
+        code += `/** Use cases accessible by actor: ${actor.name} */\n`;
+        code += `class ${className} {\n\n`;
+        if (hasShared) {
+          code += '    constructor() {\n';
+          code += '        this.handler = new UseCaseHandler();\n';
+          code += '    }\n\n';
+        }
+        if (ownedUcs.length === 0) {
+          code += '    // No use cases directly associated with this actor\n\n';
+        } else {
+          ownedUcs.forEach(uc => { code += emitJSMethod(uc); });
+        }
+        code += '}\n\n';
       });
-      code += '}\n\n';
-      code += 'export default UseCaseHandler;\n\n';
+
+      if (hasShared) code += 'export { UseCaseHandler';
+      else           code += 'export {';
+      actors.forEach((a, i) => {
+        const cn = toClassName(a.name);
+        code += (hasShared || i > 0 ? ', ' : ' ') + cn;
+      });
+      code += ' };\n\n';
+
       code += '// ── Demo ──────────────────────────────────────────────\n';
-      code += '// const h = new UseCaseHandler();\n';
-      usecases.forEach(uc => {
-        const m  = toCamelCase(uc.name);
-        const mC = m.charAt(0).toUpperCase() + m.slice(1);
-        code += `// console.log("${uc.name}:", h.execute${mC}());\n`;
+      actors.forEach(actor => {
+        const ownedIds  = actorUcIds.get(actor.id) || new Set();
+        const ownedUcs  = usecases.filter(uc => ownedIds.has(uc.id));
+        const className = toClassName(actor.name);
+        const varName   = toCamelCase(actor.name);
+        code += `// const ${varName} = new ${className}();\n`;
+        ownedUcs.forEach(uc => {
+          code += `// console.log("${actor.name} → ${uc.name}:", ${varName}.execute${toPascalCase(uc.name)}());\n`;
+        });
       });
     }
 
@@ -1088,88 +1361,413 @@ class CodeGenerator {
     return this.generateSequenceCode(elements, connections, language);
   }
 
+  /**
+   * generateSequenceCode(elements, connections, language)
+   * ─────────────────────────────────────────────────────
+   * WHAT CHANGED (v2):
+   *   Old: emitted one flat class with one method per message, grouped by
+   *        sender lifeline. Order was wrong, nesting was lost, no params/returns.
+   *
+   *   New: emits one REAL class per lifeline. Each class:
+   *     - holds field references to the other participants it calls
+   *     - has properly typed method stubs for every message it RECEIVES
+   *     - calls the correct receiver's method inside the sender's body
+   *       (preserving the original message ORDER from the diagram)
+   *     - adds a Runner/main class that calls only the top-level messages
+   *       (messages whose sender is NOT the target of another message in
+   *        the same flow, i.e. the "entry point" calls)
+   *
+   * ALGORITHM:
+   *   1. Sort connections by their index in the array (= diagram time order).
+   *   2. For each lifeline, collect:
+   *        outgoing = messages it sends   → go into the method BODY of that lifeline
+   *        incoming = messages it receives → become METHOD SIGNATURES on that lifeline
+   *   3. Build a dependency map: if lifeline A sends a message to B,
+   *      A needs a field reference `b: B`.
+   *   4. Identify "top-level" messages = messages whose sender is never
+   *      the receiver of an earlier message (i.e. the initiator calls).
+   *      These go into the Runner/main entry point.
+   *   5. Emit one class per lifeline, then the Runner class.
+   */
   static generateSequenceCode(elements, connections, language) {
-    const lifelines = elements.filter(e => e.type === 'lifeline');
+    const lifelines = elements.filter(e => e.type === 'lifeline' || e.type === 'actor');
     if (lifelines.length === 0) {
       return language === 'Python' ? '# No lifelines defined\npass\n' : '// No lifelines defined\n';
     }
 
+    // ── Step 1: sort messages by diagram order (array index = time order) ──
+    const messages = connections.filter(c => {
+      const f = elements.find(e => e.id === c.from);
+      const t = elements.find(e => e.id === c.to);
+      return f && t && (f.type === 'lifeline' || f.type === 'actor') &&
+                       (t.type === 'lifeline' || t.type === 'actor');
+    });
+
+    // ── Step 2: build per-lifeline outgoing/incoming maps ──────────────────
+    // outgoing[id] = [ {msg, toEl} ]   — messages this lifeline SENDS
+    // incoming[id] = [ {msg, fromEl} ] — messages this lifeline RECEIVES
+    const outgoing = {}, incoming = {};
+    lifelines.forEach(ll => { outgoing[ll.id] = []; incoming[ll.id] = []; });
+
+    messages.forEach(msg => {
+      const fromEl = elements.find(e => e.id === msg.from);
+      const toEl   = elements.find(e => e.id === msg.to);
+      if (!fromEl || !toEl) return;
+      if (outgoing[fromEl.id]) outgoing[fromEl.id].push({ msg, toEl });
+      if (incoming[toEl.id])   incoming[toEl.id].push({ msg, fromEl });
+    });
+
+    // ── Step 3: dependency map — who does each lifeline need a field for? ──
+    const deps = {};  // deps[ll.id] = Set of lifeline elements it calls
+    lifelines.forEach(ll => { deps[ll.id] = new Set(); });
+    messages.forEach(msg => {
+      if (deps[msg.from]) deps[msg.from].add(msg.to);
+    });
+
+    // ── Step 4: top-level senders (never receive a message themselves) ──────
+    const receiverIds = new Set(messages.map(m => m.to));
+    const topSenders  = lifelines.filter(ll => !receiverIds.has(ll.id));
+    // Fallback: if every lifeline receives something (circular), use first sender
+    const entryLifelines = topSenders.length > 0 ? topSenders : [lifelines[0]];
+    // Top-level messages = sent by an entry lifeline
+    const entryMsgIds = new Set(
+      messages.filter(m => entryLifelines.some(el => el.id === m.from)).map(m => m.id)
+    );
+
+    // ── Step 5: emit code per language ─────────────────────────────────────
+    const ni = (name, ctx) => this.normalizeIdentifier(name, ctx);
     let code = '';
 
+    // ── Helper: infer a plausible return type from message label ───────────
+    const inferReturnType = (label, lang) => {
+      if (!label) return lang === 'Java' ? 'void' : 'None';
+      const l = label.toLowerCase();
+      if (l.startsWith('get') || l.includes('fetch') || l.includes('find') || l.includes('load'))
+        return lang === 'Java' ? 'Object' : 'object';
+      if (l.includes('create') || l.includes('build') || l.includes('make'))
+        return lang === 'Java' ? 'Object' : 'object';
+      if (l.includes('check') || l.includes('is') || l.includes('has') || l.includes('valid') || l.includes('auth'))
+        return lang === 'Java' ? 'boolean' : 'bool';
+      if (l.includes('count') || l.includes('size') || l.includes('index'))
+        return lang === 'Java' ? 'int' : 'int';
+      if (l.includes('token') || l.includes('name') || l.includes('label') || l.includes('message'))
+        return lang === 'Java' ? 'String' : 'str';
+      return lang === 'Java' ? 'void' : 'None';
+    };
+
+    // ─────────────────────────── JAVA ─────────────────────────────────────
     if (language === 'Java') {
       code += 'package com.example.sequences;\n\n';
-      code += '/**\n * Auto-generated Sequence Handler.\n */\n';
-      code += 'public class SequenceHandler {\n\n';
+      code += '/**\n * Auto-generated sequence classes.\n';
+      code += ' * Participants: ' + lifelines.map(ll => ll.name).join(', ') + '\n */\n\n';
+
       lifelines.forEach(ll => {
-        const msgs = connections.filter(c => c.from === ll.id);
-        msgs.forEach(msg => {
-          const mName = this.normalizeIdentifier(msg.label || 'interact', 'method');
-          const toEl  = elements.find(e => e.id === msg.to);
-          code += `    /** Message from ${ll.name} → ${toEl?.name || '?'}: ${msg.label || ''} */\n`;
-          code += `    public void ${mName}() {\n`;
-          code += `        System.out.println("${ll.name} → ${toEl?.name || '?'}: ${msg.label || mName}");\n`;
+        const className = ni(ll.name, 'class');
+        const out = outgoing[ll.id];
+        const inc = incoming[ll.id];
+        const fieldIds = deps[ll.id];
+
+        code += `// ${'─'.repeat(60)}\n`;
+        code += `// Lifeline: ${ll.name}\n`;
+        code += `// ${'─'.repeat(60)}\n`;
+        code += `public class ${className} {\n\n`;
+
+        // Fields for each lifeline this one calls
+        fieldIds.forEach(targetId => {
+          const target = elements.find(e => e.id === targetId);
+          if (!target) return;
+          const fieldType = ni(target.name, 'class');
+          const fieldName = ni(target.name, 'method');
+          code += `    private ${fieldType} ${fieldName};\n`;
+        });
+        if (fieldIds.size > 0) code += '\n';
+
+        // Constructor injecting dependencies
+        if (fieldIds.size > 0) {
+          const params = [...fieldIds].map(id => {
+            const t = elements.find(e => e.id === id);
+            if (!t) return '';
+            return `${ni(t.name, 'class')} ${ni(t.name, 'method')}`;
+          }).filter(Boolean).join(', ');
+          code += `    public ${className}(${params}) {\n`;
+          fieldIds.forEach(id => {
+            const t = elements.find(e => e.id === id);
+            if (!t) return;
+            const fn = ni(t.name, 'method');
+            code += `        this.${fn} = ${fn};\n`;
+          });
+          code += '    }\n\n';
+        }
+
+        // One method per INCOMING message (this lifeline is the receiver)
+        inc.forEach(({ msg, fromEl }) => {
+          const mName  = ni(msg.label || 'handle', 'method');
+          const retType = inferReturnType(msg.label, 'Java');
+          const isReturn = msg.type === 'return';
+          if (isReturn) return; // return arrows don't generate receiver methods
+          code += `    /**\n     * Receives: ${fromEl.name} → ${ll.name}: ${msg.label || mName}\n     */\n`;
+          code += `    public ${retType} ${mName}(String caller) {\n`;
+          // Inside this method, emit the outgoing calls triggered by receiving this message
+          const triggered = out.filter(({ msg: om }) =>
+            messages.indexOf(om) > messages.indexOf(msg)
+          );
+          triggered.forEach(({ msg: om, toEl }) => {
+            const callName = ni(om.label || 'interact', 'method');
+            const fieldName = ni(toEl.name, 'method');
+            code += `        ${fieldName}.${callName}("${ll.name}");\n`;
+          });
+          if (retType !== 'void') {
+            // FIX 1: return a type-safe default, not null — null is a compile
+            // error for Java primitives (boolean, int, etc.)
+            const javaDefault = {
+              'boolean': 'false',
+              'int':     '0',
+              'long':    '0L',
+              'double':  '0.0',
+              'float':   '0.0f',
+              'String':  'null',
+              'Object':  'null',
+            }[retType] || 'null';
+            code += `        return ${javaDefault}; // TODO: return actual ${retType}\n`;
+          }
           code += '    }\n\n';
         });
+
+        // If this lifeline sends messages but receives none (entry point),
+        // emit a single run() method with all sends in order
+        if (inc.length === 0 && out.length > 0) {
+          code += `    /** Entry point — initiates the sequence. */\n`;
+          code += `    public void run() {\n`;
+          out.forEach(({ msg, toEl }) => {
+            if (msg.type === 'return') return;
+            const callName = ni(msg.label || 'interact', 'method');
+            const fieldName = ni(toEl.name, 'method');
+            code += `        ${fieldName}.${callName}("${ll.name}");\n`;
+          });
+          code += '    }\n\n';
+        }
+
+        code += '}\n\n';
       });
-      // main that runs all messages in order
+
+      // Runner / main class
+      code += '// ── Runner ───────────────────────────────────────────────\n';
+      code += 'public class SequenceRunner {\n\n';
       code += '    public static void main(String[] args) {\n';
-      code += '        SequenceHandler seq = new SequenceHandler();\n';
-      lifelines.forEach(ll => {
-        const msgs = connections.filter(c => c.from === ll.id);
-        msgs.forEach(msg => {
-          const mName = this.normalizeIdentifier(msg.label || 'interact', 'method');
-          code += `        seq.${mName}();\n`;
-        });
+      // Instantiate all lifelines bottom-up (dependents first)
+      const order = [...lifelines].reverse();
+      order.forEach(ll => {
+        const className = ni(ll.name, 'class');
+        const varName   = ni(ll.name, 'method');
+        const fieldIds  = deps[ll.id];
+        if (fieldIds.size === 0) {
+          code += `        ${className} ${varName} = new ${className}();\n`;
+        } else {
+          const args2 = [...fieldIds].map(id => {
+            const t = elements.find(e => e.id === id);
+            return t ? ni(t.name, 'method') : '';
+          }).filter(Boolean).join(', ');
+          code += `        ${className} ${varName} = new ${className}(${args2});\n`;
+        }
+      });
+      code += '\n        // Execute top-level sequence calls in diagram order\n';
+      entryLifelines.forEach(ll => {
+        const varName = ni(ll.name, 'method');
+        code += `        ${varName}.run();\n`;
       });
       code += '    }\n';
       code += '}\n';
 
+    // ─────────────────────────── PYTHON ───────────────────────────────────
     } else if (language === 'Python') {
-      code += 'class SequenceHandler:\n';
-      code += '    """Auto-generated Sequence Handler."""\n\n';
+      // FIX 3: snake_case field names for Python
+      const pyField = (name) => this.toSnakeCase(this.normalizeIdentifier(name, 'class'));
+
+      code += '"""\nAuto-generated sequence classes.\n';
+      code += 'Participants: ' + lifelines.map(ll => ll.name).join(', ') + '\n"""\n\n';
+      code += 'from __future__ import annotations\n\n\n';
+
       lifelines.forEach(ll => {
-        const msgs = connections.filter(c => c.from === ll.id);
-        msgs.forEach(msg => {
-          const mName = this.normalizeIdentifier(msg.label || 'interact', 'method');
-          const toEl  = elements.find(e => e.id === msg.to);
-          code += `    def ${mName}(self) -> None:\n`;
-          code += `        """Message from ${ll.name} to ${toEl?.name || '?'}"""\n`;
-          code += `        print(f"${ll.name} → ${toEl?.name || '?'}: ${msg.label || mName}")\n\n`;
+        const className = ni(ll.name, 'class');
+        const out = outgoing[ll.id];
+        const inc = incoming[ll.id];
+        const fieldIds = deps[ll.id];
+
+        code += `# ${'─'.repeat(60)}\n`;
+        code += `# Lifeline: ${ll.name}\n`;
+        code += `# ${'─'.repeat(60)}\n`;
+        code += `class ${className}:\n\n`;
+
+        // __init__ with typed fields
+        if (fieldIds.size > 0) {
+          const params = [...fieldIds].map(id => {
+            const t = elements.find(e => e.id === id);
+            if (!t) return '';
+            return `${pyField(t.name)}: ${ni(t.name, 'class')}`;
+          }).filter(Boolean).join(', ');
+          code += `    def __init__(self, ${params}) -> None:\n`;
+          fieldIds.forEach(id => {
+            const t = elements.find(e => e.id === id);
+            if (!t) return;
+            const fn = pyField(t.name);
+            code += `        self.${fn} = ${fn}\n`;
+          });
+          code += '\n';
+        } else {
+          // No fields — no __init__ needed; methods follow directly
+        }
+
+        // Incoming message methods
+        inc.forEach(({ msg, fromEl }) => {
+          if (msg.type === 'return') return;
+          const mName   = ni(msg.label || 'handle', 'method');
+          const retType = inferReturnType(msg.label, 'Python');
+          const retHint = retType === 'None' ? 'None' : retType;
+          code += `    def ${mName}(self, caller: str) -> ${retHint}:\n`;
+          code += `        """Receives: ${fromEl.name} → ${ll.name}: ${msg.label || mName}"""\n`;
+          const triggered = out.filter(({ msg: om }) =>
+            messages.indexOf(om) > messages.indexOf(msg)
+          );
+          triggered.forEach(({ msg: om, toEl }) => {
+            const callName  = ni(om.label || 'interact', 'method');
+            const fieldName = pyField(toEl.name);
+            code += `        self.${fieldName}.${callName}("${ll.name}")\n`;
+          });
+          if (retType !== 'None') {
+            code += `        return None  # TODO: return actual ${retType}\n`;
+          } else if (triggered.length === 0) {
+            code += '        pass\n';
+          }
+          code += '\n';
         });
-      });
-      code += '\nif __name__ == "__main__":\n';
-      code += '    seq = SequenceHandler()\n';
-      lifelines.forEach(ll => {
-        connections.filter(c => c.from === ll.id).forEach(msg => {
-          const mName = this.normalizeIdentifier(msg.label || 'interact', 'method');
-          code += `    seq.${mName}()\n`;
-        });
+
+        // Entry-point run() for initiators
+        if (inc.length === 0 && out.length > 0) {
+          code += '    def run(self) -> None:\n';
+          code += '        """Initiates the sequence."""\n';
+          out.forEach(({ msg, toEl }) => {
+            if (msg.type === 'return') return;
+            const callName  = ni(msg.label || 'interact', 'method');
+            const fieldName = pyField(toEl.name);
+            code += `        self.${fieldName}.${callName}("${ll.name}")\n`;
+          });
+          code += '\n';
+        }
       });
 
+      // Runner
+      code += '\n# ── Runner ───────────────────────────────────────────────\n';
+      code += 'if __name__ == "__main__":\n';
+      const order2 = [...lifelines].reverse();
+      order2.forEach(ll => {
+        const className = ni(ll.name, 'class');
+        const varName   = pyField(ll.name);
+        const fieldIds  = deps[ll.id];
+        if (fieldIds.size === 0) {
+          code += `    ${varName} = ${className}()\n`;
+        } else {
+          const args2 = [...fieldIds].map(id => {
+            const t = elements.find(e => e.id === id);
+            return t ? pyField(t.name) : '';
+          }).filter(Boolean).join(', ');
+          code += `    ${varName} = ${className}(${args2})\n`;
+        }
+      });
+      entryLifelines.forEach(ll => {
+        code += `    ${pyField(ll.name)}.run()\n`;
+      });
+
+    // ─────────────────────────── JAVASCRIPT ───────────────────────────────
     } else if (language === 'JavaScript') {
-      code += '/** Auto-generated Sequence Handler. */\n';
-      code += 'class SequenceHandler {\n\n';
+      code += '/**\n * Auto-generated sequence classes.\n';
+      code += ' * Participants: ' + lifelines.map(ll => ll.name).join(', ') + '\n */\n\n';
+
       lifelines.forEach(ll => {
-        const msgs = connections.filter(c => c.from === ll.id);
-        msgs.forEach(msg => {
-          const mName = this.normalizeIdentifier(msg.label || 'interact', 'method');
-          const toEl  = elements.find(e => e.id === msg.to);
-          code += `    /** ${ll.name} → ${toEl?.name || '?'}: ${msg.label || ''} */\n`;
-          code += `    ${mName}() {\n`;
-          code += `        console.log("${ll.name} → ${toEl?.name || '?'}: ${msg.label || mName}");\n`;
+        const className = ni(ll.name, 'class');
+        const out = outgoing[ll.id];
+        const inc = incoming[ll.id];
+        const fieldIds = deps[ll.id];
+
+        code += `// ${'─'.repeat(60)}\n`;
+        code += `// Lifeline: ${ll.name}\n`;
+        code += `// ${'─'.repeat(60)}\n`;
+        code += `class ${className} {\n\n`;
+
+        // Constructor
+        if (fieldIds.size > 0) {
+          const params = [...fieldIds].map(id => {
+            const t = elements.find(e => e.id === id);
+            return t ? ni(t.name, 'method') : '';
+          }).filter(Boolean).join(', ');
+          code += `    constructor(${params}) {\n`;
+          fieldIds.forEach(id => {
+            const t = elements.find(e => e.id === id);
+            if (!t) return;
+            const fn = ni(t.name, 'method');
+            code += `        this.${fn} = ${fn};\n`;
+          });
+          code += '    }\n\n';
+        }
+
+        // Incoming message methods
+        inc.forEach(({ msg, fromEl }) => {
+          if (msg.type === 'return') return;
+          const mName = ni(msg.label || 'handle', 'method');
+          code += `    /** Receives: ${fromEl.name} → ${ll.name}: ${msg.label || mName} */\n`;
+          code += `    ${mName}(caller) {\n`;
+          const triggered = out.filter(({ msg: om }) =>
+            messages.indexOf(om) > messages.indexOf(msg)
+          );
+          triggered.forEach(({ msg: om, toEl }) => {
+            const callName  = ni(om.label || 'interact', 'method');
+            const fieldName = ni(toEl.name, 'method');
+            code += `        this.${fieldName}.${callName}('${ll.name}');\n`;
+          });
+          if (triggered.length === 0) {
+            code += '        // TODO: implement handler\n';
+          }
           code += '    }\n\n';
         });
+
+        // Entry-point run()
+        if (inc.length === 0 && out.length > 0) {
+          code += '    /** Initiates the sequence. */\n';
+          code += '    run() {\n';
+          out.forEach(({ msg, toEl }) => {
+            if (msg.type === 'return') return;
+            const callName  = ni(msg.label || 'interact', 'method');
+            const fieldName = ni(toEl.name, 'method');
+            code += `        this.${fieldName}.${callName}('${ll.name}');\n`;
+          });
+          code += '    }\n\n';
+        }
+
+        code += `}\n\n`;
       });
-      code += '}\n\n';
-      code += 'export default SequenceHandler;\n\n';
-      code += '// ── Demo ──────────────────────────────────────────────\n';
-      code += '// const seq = new SequenceHandler();\n';
-      lifelines.forEach(ll => {
-        connections.filter(c => c.from === ll.id).forEach(msg => {
-          const mName = this.normalizeIdentifier(msg.label || 'interact', 'method');
-          code += `// seq.${mName}();\n`;
-        });
+
+      // Runner
+      code += '// ── Runner ───────────────────────────────────────────────\n';
+      code += '(function main() {\n';
+      const order3 = [...lifelines].reverse();
+      order3.forEach(ll => {
+        const className = ni(ll.name, 'class');
+        const varName   = ni(ll.name, 'method');
+        const fieldIds  = deps[ll.id];
+        if (fieldIds.size === 0) {
+          code += `    const ${varName} = new ${className}();\n`;
+        } else {
+          const args2 = [...fieldIds].map(id => {
+            const t = elements.find(e => e.id === id);
+            return t ? ni(t.name, 'method') : '';
+          }).filter(Boolean).join(', ');
+          code += `    const ${varName} = new ${className}(${args2});\n`;
+        }
       });
+      code += '\n    // Execute top-level sequence calls in diagram order\n';
+      entryLifelines.forEach(ll => {
+        code += `    ${ni(ll.name, 'method')}.run();\n`;
+      });
+      code += '})();\n';
     }
 
     return code;

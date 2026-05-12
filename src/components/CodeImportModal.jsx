@@ -102,7 +102,19 @@ const CodeImportModal = ({ onImport, onClose, diagramType = 'class' }) => {
 
   const handleImportDiagram = () => {
     if (conversionResult?.success) {
-      onImport(conversionResult.elements, conversionResult.connections);
+      // FIX: pass the full result so UMLEditor can honour replaceAll and
+      // auto-switch the diagram type (e.g. class → sequence) when needed.
+      onImport(
+        conversionResult.elements,
+        conversionResult.connections,
+        {
+          replaceAll:  conversionResult.replaceAll  || false,
+          diagramType: conversionResult.metadata?.sourceLanguage
+            ? (diagramType === 'sequence' ? 'sequence' : diagramType)
+            : diagramType,
+          language:    conversionResult.metadata?.sourceLanguage || language,
+        }
+      );
       onClose();
     }
   };

@@ -107,7 +107,7 @@ class TypeMapper {
         'Byte': 'number',
         'List': 'Array',
         'ArrayList': 'Array',
-        'Map': 'Object',      // Generic key-value → plain JS object
+        'Map': 'Map',         // Keyed collection → JS built-in Map
         'HashMap': 'Map',     // Keyed collection → JS built-in Map
         'Set': 'Set',
         'Date': 'Date',
