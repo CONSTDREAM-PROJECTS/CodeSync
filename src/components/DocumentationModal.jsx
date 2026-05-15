@@ -480,19 +480,29 @@ const DIAGRAMS = [
 function Section({ title, children, defaultOpen = false }) {
   const [open, setOpen] = useState(defaultOpen);
   return (
-    <div className="border border-[#3e3e42] rounded-lg overflow-hidden mb-3">
+    <div className="border border-[#3e3e42] rounded-lg overflow-hidden mb-3 transition-all duration-200 hover:border-[#9c9b7f]/40">
       <button
         onClick={() => setOpen(o => !o)}
-        className="w-full flex items-center justify-between px-4 py-3 bg-[#2d2d30] hover:bg-[#3e3e42] transition-colors text-left"
+        className="w-full flex items-center justify-between px-4 py-3 bg-[#2d2d30] hover:bg-[#3e3e42] transition-all duration-200 text-left group"
       >
-        <span className="text-sm font-semibold text-white">{title}</span>
-        {open ? <ChevronDown size={16} className="text-gray-400" /> : <ChevronRight size={16} className="text-gray-400" />}
+        <span className="text-sm font-semibold text-white group-hover:translate-x-0.5 transition-transform duration-200">{title}</span>
+        {open 
+          ? <ChevronDown size={16} className="text-gray-400 group-hover:text-[#9c9b7f] transition-all duration-200 rotate-0" /> 
+          : <ChevronRight size={16} className="text-gray-400 group-hover:text-[#9c9b7f] transition-all duration-200 -rotate-90" />
+        }
       </button>
-      {open && (
-        <div className="px-4 py-4 bg-[#1e1e1e] text-sm text-gray-300 leading-relaxed">
+      <div
+        style={{
+          maxHeight: open ? 1000 : 0,
+          opacity: open ? 1 : 0,
+          overflow: 'hidden',
+          transition: 'max-height 300ms cubic-bezier(0.4, 0, 0.2, 1), opacity 200ms ease-out',
+        }}
+      >
+        <div className="px-4 py-4 bg-[#1e1e1e] text-sm text-gray-300 leading-relaxed border-t border-[#2d2d30]">
           {children}
         </div>
-      )}
+      </div>
     </div>
   );
 }
@@ -509,14 +519,14 @@ function CodeBlock({ code }) {
   };
 
   return (
-    <div className="relative rounded border border-[#3e3e42] overflow-hidden mt-2">
+    <div className="relative rounded border border-[#3e3e42] overflow-hidden mt-2 transition-all duration-200 hover:border-[#9c9b7f]/30 hover:shadow-md hover:shadow-[#9c9b7f]/10">
       <div className="flex items-center justify-between px-3 py-1.5 bg-[#2d2d30] border-b border-[#3e3e42]">
         <span className="text-xs text-gray-400 font-mono">sample</span>
         <button
           onClick={handleCopy}
-          className="text-xs text-gray-400 hover:text-white transition-colors px-2 py-0.5 rounded hover:bg-[#3e3e42]"
+          className="text-xs text-gray-400 hover:text-white transition-all duration-200 px-2 py-0.5 rounded hover:bg-[#3e3e42] hover:-translate-y-0.5"
         >
-          {copied ? 'Copied!' : 'Copy'}
+          {copied ? '✓ Copied!' : 'Copy'}
         </button>
       </div>
       <pre className="overflow-x-auto p-3 text-xs font-mono text-[#d4d4d4] bg-[#1e1e1e] leading-5 max-h-60 overflow-y-auto">
@@ -542,10 +552,28 @@ export default function DocumentationModal({ onClose }) {
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-70"
       onClick={onClose}
+      style={{
+        animation: 'modalBackdropIn 300ms ease-out forwards',
+      }}
     >
+      <style>{`
+        @keyframes docSlideIn {
+          from {
+            opacity: 0;
+            transform: translateY(30px) scale(0.95);
+          }
+          to {
+            opacity: 1;
+            transform: translateY(0) scale(1);
+          }
+        }
+      `}</style>
       <div
         className="bg-[#252526] border border-[#3e3e42] rounded-xl shadow-2xl w-full max-w-3xl mx-4 flex flex-col"
-        style={{ maxHeight: '90vh' }}
+        style={{ 
+          maxHeight: '90vh',
+          animation: 'docSlideIn 400ms cubic-bezier(0.34, 1.56, 0.64, 1) forwards',
+        }}
         onClick={e => e.stopPropagation()}
       >
         {/* Header */}
@@ -553,7 +581,7 @@ export default function DocumentationModal({ onClose }) {
           <div className="flex items-center gap-3">
             <BookOpen size={20} className="text-[#007acc]" />
             <div>
-              <h2 className="text-lg font-bold text-white">Documentation</h2>
+              <h2 className="text-lg font-bold text-white">User Manual</h2>
               <p className="text-xs text-gray-400 mt-0.5">How the diagrams work and how to use Code to Diagram</p>
             </div>
           </div>
@@ -571,13 +599,22 @@ export default function DocumentationModal({ onClose }) {
             <button
               key={d.id}
               onClick={() => setActiveTab(d.id)}
-              className={`flex items-center gap-2 px-4 py-3 text-sm font-medium border-b-2 transition-colors mr-1 ${
+              className={`flex items-center gap-2 px-4 py-3 text-sm font-medium border-b-2 transition-all duration-300 mr-1 ${
                 activeTab === d.id
                   ? 'border-[#007acc] text-white'
                   : 'border-transparent text-gray-400 hover:text-gray-200'
               }`}
+              style={{
+                transform: activeTab === d.id ? 'translateY(0)' : 'translateY(0)',
+              }}
             >
-              <span style={{ color: activeTab === d.id ? d.color : undefined }}>{d.icon}</span>
+              <span style={{ 
+                color: activeTab === d.id ? d.color : undefined,
+                transition: 'color 300ms ease-out, transform 300ms ease-out',
+                transform: activeTab === d.id ? 'scale(1.1)' : 'scale(1)',
+              }}>
+                {d.icon}
+              </span>
               {d.label}
             </button>
           ))}
@@ -665,7 +702,7 @@ export default function DocumentationModal({ onClose }) {
 
         {/* Footer */}
         <div className="px-6 py-3 border-t border-[#3e3e42] flex-shrink-0 flex items-center justify-between">
-          <span className="text-xs text-gray-500">CodeSync Documentation</span>
+          <span className="text-xs text-gray-500">CodeSync User Manual</span>
           <button
             onClick={onClose}
             className="px-4 py-1.5 text-sm bg-[#3c3c3c] hover:bg-[#4a4a4f] text-white rounded transition-colors"

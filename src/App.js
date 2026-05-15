@@ -91,9 +91,9 @@ function App() {
           {currentPage !== 'home' && (
             <button
               onClick={goBack}
-              className="mr-3 p-2 text-gray-300 hover:text-white hover:bg-[#3e3e42] rounded transition-colors"
+              className="mr-3 p-2 text-gray-300 hover:text-white hover:bg-[#3e3e42] rounded transition-all duration-200 group"
             >
-              <ArrowLeft size={18} />
+              <ArrowLeft size={18} className="group-hover:-translate-x-0.5 transition-transform duration-200" />
             </button>
           )}
           <img
@@ -104,11 +104,13 @@ function App() {
           />
           {currentPage === 'home' && (
             <div className="hidden md:flex items-center space-x-1">
-              <button onClick={() => navigateTo('about')} className="px-3 py-1.5 text-sm text-gray-300 hover:text-white hover:bg-[#3e3e42] rounded transition-colors">
-                About Us
+              <button onClick={() => navigateTo('about')} className="px-3 py-1.5 text-sm text-gray-300 hover:text-white hover:bg-[#3e3e42] rounded transition-all duration-200 group relative overflow-hidden">
+                <span className="relative z-10 group-hover:translate-x-0.5 transition-transform duration-200">About Us</span>
+                <span className="absolute inset-0 bg-gradient-to-r from-[#9c9b7f]/0 via-[#9c9b7f]/10 to-[#9c9b7f]/0 opacity-0 group-hover:opacity-100 transition-opacity duration-300"></span>
               </button>
-              <button onClick={() => navigateTo('contact')} className="px-3 py-1.5 text-sm text-gray-300 hover:text-white hover:bg-[#3e3e42] rounded transition-colors">
-                Contact Us
+              <button onClick={() => navigateTo('contact')} className="px-3 py-1.5 text-sm text-gray-300 hover:text-white hover:bg-[#3e3e42] rounded transition-all duration-200 group relative overflow-hidden">
+                <span className="relative z-10 group-hover:translate-x-0.5 transition-transform duration-200">Contact Us</span>
+                <span className="absolute inset-0 bg-gradient-to-r from-[#9c9b7f]/0 via-[#9c9b7f]/10 to-[#9c9b7f]/0 opacity-0 group-hover:opacity-100 transition-opacity duration-300"></span>
               </button>
             </div>
           )}
@@ -116,9 +118,9 @@ function App() {
 
         <div className="flex items-center space-x-3">
           {currentPage === 'home' && (
-            <button className="hidden md:flex items-center space-x-2 px-4 py-1.5 btn-muted" onClick={() => setShowDocs(true)}>
-              <Book size={16} />
-              <span className="text-sm">Documentation</span>
+            <button className="hidden md:flex items-center space-x-2 px-4 py-1.5 btn-muted group" onClick={() => setShowDocs(true)}>
+              <Book size={16} className="group-hover:rotate-12 transition-transform duration-200" />
+              <span className="text-sm group-hover:translate-x-0.5 transition-transform duration-200">User Manual</span>
             </button>
           )}
 
@@ -132,10 +134,10 @@ function App() {
               </div>
               <button
                 onClick={handleLogout}
-                className="p-1.5 rounded hover:bg-[#3e3e42] text-gray-400 hover:text-white transition-colors"
+                className="p-1.5 rounded hover:bg-[#3e3e42] text-gray-400 hover:text-white transition-all duration-200 group"
                 title="Log out"
               >
-                <LogOut size={15} />
+                <LogOut size={15} className="group-hover:rotate-12 group-hover:-translate-x-0.5 transition-all duration-200" />
               </button>
             </div>
           ) : (
@@ -146,10 +148,10 @@ function App() {
 
           {currentPage === 'home' && (
             <button
-              className="md:hidden p-2 text-gray-300 hover:text-white"
+              className="md:hidden p-2 text-gray-300 hover:text-white transition-all duration-200 group"
               onClick={() => setSidebarOpen(!sidebarOpen)}
             >
-              <Menu size={20} />
+              <Menu size={18} className="group-hover:rotate-90 transition-transform duration-300" />
             </button>
           )}
         </div>
@@ -207,7 +209,7 @@ function App() {
               Contact Us
             </button>
             <button className="w-full text-left px-3 py-2 text-sm text-gray-300 hover:bg-[#2a2d2e] rounded" onClick={() => { setShowDocs(true); setSidebarOpen(false); }}>
-              Documentation
+              User Manual
             </button>
           </div>
         </div>

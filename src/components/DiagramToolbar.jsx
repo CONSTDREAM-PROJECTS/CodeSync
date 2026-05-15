@@ -32,7 +32,7 @@
  */
 
 import React from 'react';
-import { Download, Upload, Save, Code, ZoomIn, ZoomOut, Grid, Undo, Redo, FileCode } from 'lucide-react';
+import { Download, Upload, Save, PenSquare, Code, ZoomIn, ZoomOut, Grid, Undo, Redo, FileCode } from 'lucide-react';
 
 /**
  * DiagramToolbar({ ...props })
@@ -143,7 +143,7 @@ const DiagramToolbar = ({
 
         {/* File Operations */}
         <button onClick={onNew} className="p-2 hover:bg-[#3e3e42] rounded transition-colors flex-shrink-0" title="New Diagram">
-          <Save size={18} />
+          <PenSquare size={18} />
         </button>
         <label className="p-2 hover:bg-[#3e3e42] rounded transition-colors cursor-pointer flex-shrink-0" title="Import JSON">
           <Upload size={18} />
