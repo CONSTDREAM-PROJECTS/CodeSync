@@ -109,9 +109,9 @@ const CodeImportModal = ({ onImport, onClose, diagramType = 'class' }) => {
         conversionResult.connections,
         {
           replaceAll:  conversionResult.replaceAll  || false,
-          diagramType: conversionResult.metadata?.sourceLanguage
-            ? (diagramType === 'sequence' ? 'sequence' : diagramType)
-            : diagramType,
+          // Use the diagramType the converter detected (usecase / sequence / class).
+          // Fall back to the currently active diagram type if not provided.
+          diagramType: conversionResult.metadata?.diagramType || diagramType,
           language:    conversionResult.metadata?.sourceLanguage || language,
         }
       );

@@ -972,13 +972,23 @@ const UMLEditor = ({ currentUser, onLoginSuccess, onLogout }) => {
       mergedConnections = [...connections, ...importedConnections];
     }
 
+    // Switch the active diagram type when the converter tells us to
+    // (e.g. use-case annotations -> 'usecase', sequence code -> 'sequence').
+    // This ensures Generate Code runs the correct generator path afterwards.
+    if (options.diagramType && options.diagramType !== selectedDiagram) {
+      setSelectedDiagram(options.diagramType);
+    }
+
     // BUG C4 FIX: set state AND save history with identical arrays so
     // Ctrl+Z restores the correctly-positioned (offset) elements.
     setElements(mergedElements);
     setConnections(mergedConnections);
     saveToHistory(mergedElements, mergedConnections);
 
-    showToast(`Successfully imported ${importedElements.length} classes from code!`, 'success');
+    const typeLabel = options.diagramType === 'usecase'  ? 'use case'
+                    : options.diagramType === 'sequence' ? 'sequence'
+                    : 'class';
+    showToast(`Successfully imported ${importedElements.length} ${typeLabel} elements from code!`, 'success');
   };
 
   /**

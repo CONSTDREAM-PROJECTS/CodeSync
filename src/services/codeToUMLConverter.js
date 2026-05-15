@@ -119,6 +119,13 @@ class CodeToUMLConverter {
         ast,
         metadata: {
           sourceLanguage: language,
+          // diagramType lets UMLEditor auto-switch to the right canvas mode
+          // after a Code to Diagram conversion (usecase, sequence, or class).
+          diagramType: ast.classes.some(c => c.elementType === 'actor' || c.elementType === 'usecase')
+            ? 'usecase'
+            : ast.classes.some(c => c.elementType === 'lifeline')
+              ? 'sequence'
+              : 'class',
           totalClasses: ast.classes.length,
           totalMethods: ast.classes.reduce((sum, cls) => sum + (cls.methods?.length || 0), 0),
           totalAttributes: ast.classes.reduce((sum, cls) => sum + (cls.attributes?.length || 0), 0),

@@ -6,6 +6,7 @@ import ResetPasswordModal from './components/ResetPasswordModal';
 import AboutPage from './components/AboutPage';
 import ContactPage from './components/ContactPage';
 import OAuthCallback from './components/OAuthCallback';
+import DocumentationModal from './components/DocumentationModal';
 import './App.css';
 
 // ─────────────────────────────────────────────────────────────
@@ -26,6 +27,7 @@ if (_initialToken) {
 function App() {
   const [sidebarOpen,     setSidebarOpen]     = useState(false);
   const [showLogin,       setShowLogin]       = useState(false);
+  const [showDocs,        setShowDocs]        = useState(false);
   const [currentUser,     setCurrentUser]     = useState(null);
   const [isTransitioning, setIsTransitioning] = useState(false);
 
@@ -114,7 +116,7 @@ function App() {
 
         <div className="flex items-center space-x-3">
           {currentPage === 'home' && (
-            <button className="hidden md:flex items-center space-x-2 px-4 py-1.5 btn-muted">
+            <button className="hidden md:flex items-center space-x-2 px-4 py-1.5 btn-muted" onClick={() => setShowDocs(true)}>
               <Book size={16} />
               <span className="text-sm">Documentation</span>
             </button>
@@ -204,11 +206,16 @@ function App() {
             <button onClick={() => { navigateTo('contact'); setSidebarOpen(false); }} className="w-full text-left px-3 py-2 text-sm text-gray-300 hover:bg-[#2a2d2e] rounded">
               Contact Us
             </button>
-            <button className="w-full text-left px-3 py-2 text-sm text-gray-300 hover:bg-[#2a2d2e] rounded">
+            <button className="w-full text-left px-3 py-2 text-sm text-gray-300 hover:bg-[#2a2d2e] rounded" onClick={() => { setShowDocs(true); setSidebarOpen(false); }}>
               Documentation
             </button>
           </div>
         </div>
+      )}
+
+      {/* Documentation Modal */}
+      {showDocs && (
+        <DocumentationModal onClose={() => setShowDocs(false)} />
       )}
 
       {/* Login Modal — never shown while a reset token is active */}
