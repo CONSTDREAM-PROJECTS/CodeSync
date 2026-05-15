@@ -88,200 +88,208 @@ class Cat extends Animal {
 }`,
   },
   usecase: {
-    Java: `// Step 1: Paste the annotations into "Code to Diagram" to build the diagram.
-// Step 2: Click "Generate Code" on the diagram to get runnable Java classes.
+    Java: `// Paste this whole file into "Code to Diagram" -- it is real runnable Java.
+// The @Actor / @UseCase / @Association / @Includes annotations in the
+// Javadoc block are what the tool reads to build the diagram.
+// After converting, click "Generate Code" to get the actor classes back.
 
-// @Actor("Customer")
-// @Actor("Admin")
+/**
+ * Use Case Diagram: Online Store
+ *
+ * @Actor("Customer")
+ * @Actor("Admin")
+ *
+ * @UseCase("Browse Products")
+ * @UseCase("Add to Cart")
+ * @UseCase("Checkout")
+ * @UseCase("Process Payment")
+ * @UseCase("Manage Inventory")
+ * @UseCase("View Reports")
+ *
+ * @Association("Customer", "Browse Products")
+ * @Association("Customer", "Add to Cart")
+ * @Association("Customer", "Checkout")
+ * @Association("Admin", "Manage Inventory")
+ * @Association("Admin", "View Reports")
+ *
+ * @Includes("Checkout", "Process Payment")
+ */
+public class OnlineStoreDiagram {
 
-// @UseCase("Browse Products")
-// @UseCase("Add to Cart")
-// @UseCase("Checkout")
-// @UseCase("Process Payment")
-// @UseCase("Manage Inventory")
-// @UseCase("View Reports")
+    // Actor: Customer
+    public boolean executeBrowseProducts() {
+        System.out.println("Customer is browsing products.");
+        return true;
+    }
 
-// @Association("Customer", "Browse Products")
-// @Association("Customer", "Add to Cart")
-// @Association("Customer", "Checkout")
-// @Association("Admin", "Manage Inventory")
-// @Association("Admin", "View Reports")
+    public boolean executeAddToCart() {
+        System.out.println("Customer added an item to the cart.");
+        return true;
+    }
 
-// @Includes("Checkout", "Process Payment")
+    public boolean executeCheckout() {
+        executeProcessPayment(); // <<include>>
+        System.out.println("Customer completed checkout.");
+        return true;
+    }
 
-// ── Generated Code output (what you get after clicking Generate Code) ────────
+    // Included use case (shared)
+    public boolean executeProcessPayment() {
+        System.out.println("Processing payment...");
+        return true;
+    }
 
-// package com.example.usecases;
-//
-// public class UseCaseHandler {
-//     public boolean executeProcessPayment() {
-//         // TODO: implement "Process Payment"
-//         return true;
-//     }
-// }
-//
-// public class Customer {
-//     private final UseCaseHandler handler = new UseCaseHandler();
-//
-//     public boolean executeBrowseProducts() {
-//         return true;
-//     }
-//     public boolean executeAddToCart() {
-//         return true;
-//     }
-//     public boolean executeCheckout() {
-//         handler.executeProcessPayment(); // <<include>>
-//         return true;
-//     }
-// }
-//
-// public class Admin {
-//     private final UseCaseHandler handler = new UseCaseHandler();
-//
-//     public boolean executeManageInventory() {
-//         return true;
-//     }
-//     public boolean executeViewReports() {
-//         return true;
-//     }
-// }
-//
-// public class UseCaseRunner {
-//     public static void main(String[] args) {
-//         Customer customer = new Customer();
-//         System.out.println("Customer: Browse Products = " + customer.executeBrowseProducts());
-//         System.out.println("Customer: Add to Cart = " + customer.executeAddToCart());
-//         System.out.println("Customer: Checkout = " + customer.executeCheckout());
-//         Admin admin = new Admin();
-//         System.out.println("Admin: Manage Inventory = " + admin.executeManageInventory());
-//         System.out.println("Admin: View Reports = " + admin.executeViewReports());
-//     }
-// }`,
-    Python: `# Step 1: Paste the annotations into "Code to Diagram" to build the diagram.
-# Step 2: Click "Generate Code" on the diagram to get runnable Python classes.
+    // Actor: Admin
+    public boolean executeManageInventory() {
+        System.out.println("Admin is managing inventory.");
+        return true;
+    }
 
-# @Actor("Customer")
-# @Actor("Admin")
+    public boolean executeViewReports() {
+        System.out.println("Admin is viewing reports.");
+        return true;
+    }
 
-# @UseCase("Browse Products")
-# @UseCase("Add to Cart")
-# @UseCase("Checkout")
-# @UseCase("Process Payment")
-# @UseCase("Manage Inventory")
-# @UseCase("View Reports")
+    public static void main(String[] args) {
+        OnlineStoreDiagram store = new OnlineStoreDiagram();
+        store.executeBrowseProducts();
+        store.executeAddToCart();
+        store.executeCheckout();
+        store.executeManageInventory();
+        store.executeViewReports();
+    }
+}`,
+    Python: `# Paste this whole file into "Code to Diagram" -- it is real runnable Python.
+# The @Actor / @UseCase / @Association / @Includes annotations in the
+# docstring are what the tool reads to build the diagram.
+# After converting, click "Generate Code" to get the actor classes back.
 
-# @Association("Customer", "Browse Products")
-# @Association("Customer", "Add to Cart")
-# @Association("Customer", "Checkout")
-# @Association("Admin", "Manage Inventory")
-# @Association("Admin", "View Reports")
+class OnlineStoreDiagram:
+    """
+    Use Case Diagram: Online Store
 
-# @Includes("Checkout", "Process Payment")
+    @Actor("Customer")
+    @Actor("Admin")
 
-# ── Generated Code output (what you get after clicking Generate Code) ────────
+    @UseCase("Browse Products")
+    @UseCase("Add to Cart")
+    @UseCase("Checkout")
+    @UseCase("Process Payment")
+    @UseCase("Manage Inventory")
+    @UseCase("View Reports")
 
-# class UseCaseHandler:
-#
-#     def execute_process_payment(self) -> bool:
-#         # TODO: implement "Process Payment"
-#         return True
-#
-#
-# class Customer:
-#
-#     def __init__(self):
-#         self.handler = UseCaseHandler()
-#
-#     def execute_browse_products(self) -> bool:
-#         return True
-#
-#     def execute_add_to_cart(self) -> bool:
-#         return True
-#
-#     def execute_checkout(self) -> bool:
-#         self.handler.execute_process_payment()  # <<include>>
-#         return True
-#
-#
-# class Admin:
-#
-#     def execute_manage_inventory(self) -> bool:
-#         return True
-#
-#     def execute_view_reports(self) -> bool:
-#         return True
-#
-#
-# if __name__ == "__main__":
-#     customer = Customer()
-#     print("Customer: Browse Products =", customer.execute_browse_products())
-#     print("Customer: Add to Cart =", customer.execute_add_to_cart())
-#     print("Customer: Checkout =", customer.execute_checkout())
-#     admin = Admin()
-#     print("Admin: Manage Inventory =", admin.execute_manage_inventory())
-#     print("Admin: View Reports =", admin.execute_view_reports())`,
-    JavaScript: `// Step 1: Paste the annotations into "Code to Diagram" to build the diagram.
-// Step 2: Click "Generate Code" on the diagram to get runnable JS classes.
+    @Association("Customer", "Browse Products")
+    @Association("Customer", "Add to Cart")
+    @Association("Customer", "Checkout")
+    @Association("Admin", "Manage Inventory")
+    @Association("Admin", "View Reports")
 
-// @Actor("Customer")
-// @Actor("Admin")
+    @Includes("Checkout", "Process Payment")
+    """
 
-// @UseCase("Browse Products")
-// @UseCase("Add to Cart")
-// @UseCase("Checkout")
-// @UseCase("Process Payment")
-// @UseCase("Manage Inventory")
-// @UseCase("View Reports")
+    def execute_browse_products(self) -> bool:
+        print("Customer is browsing products.")
+        return True
 
-// @Association("Customer", "Browse Products")
-// @Association("Customer", "Add to Cart")
-// @Association("Customer", "Checkout")
-// @Association("Admin", "Manage Inventory")
-// @Association("Admin", "View Reports")
+    def execute_add_to_cart(self) -> bool:
+        print("Customer added an item to the cart.")
+        return True
 
-// @Includes("Checkout", "Process Payment")
+    def execute_checkout(self) -> bool:
+        self.execute_process_payment()  # <<include>>
+        print("Customer completed checkout.")
+        return True
 
-// ── Generated Code output (what you get after clicking Generate Code) ────────
+    def execute_process_payment(self) -> bool:
+        print("Processing payment...")
+        return True
 
-// class UseCaseHandler {
-//     executeProcessPayment() {
-//         // TODO: implement "Process Payment"
-//         return true;
-//     }
-// }
-//
-// class Customer {
-//     constructor() {
-//         this.handler = new UseCaseHandler();
-//     }
-//     executeBrowseProducts() {
-//         return true;
-//     }
-//     executeAddToCart() {
-//         return true;
-//     }
-//     executeCheckout() {
-//         this.handler.executeProcessPayment(); // <<include>>
-//         return true;
-//     }
-// }
-//
-// class Admin {
-//     executeManageInventory() {
-//         return true;
-//     }
-//     executeViewReports() {
-//         return true;
-//     }
-// }
-//
-// export { UseCaseHandler, Customer, Admin };
-//
-// // const customer = new Customer();
-// // console.log("Customer: Browse Products =", customer.executeBrowseProducts());
-// // console.log("Customer: Checkout =", customer.executeCheckout());
-// // const admin = new Admin();
-// // console.log("Admin: View Reports =", admin.executeViewReports());`,
+    def execute_manage_inventory(self) -> bool:
+        print("Admin is managing inventory.")
+        return True
+
+    def execute_view_reports(self) -> bool:
+        print("Admin is viewing reports.")
+        return True
+
+
+if __name__ == "__main__":
+    store = OnlineStoreDiagram()
+    store.execute_browse_products()
+    store.execute_add_to_cart()
+    store.execute_checkout()
+    store.execute_manage_inventory()
+    store.execute_view_reports()`,
+    JavaScript: `// Paste this whole file into "Code to Diagram" -- it is real runnable JavaScript.
+// The @Actor / @UseCase / @Association / @Includes annotations in the
+// JSDoc block are what the tool reads to build the diagram.
+// After converting, click "Generate Code" to get the actor classes back.
+
+/**
+ * Use Case Diagram: Online Store
+ *
+ * @Actor("Customer")
+ * @Actor("Admin")
+ *
+ * @UseCase("Browse Products")
+ * @UseCase("Add to Cart")
+ * @UseCase("Checkout")
+ * @UseCase("Process Payment")
+ * @UseCase("Manage Inventory")
+ * @UseCase("View Reports")
+ *
+ * @Association("Customer", "Browse Products")
+ * @Association("Customer", "Add to Cart")
+ * @Association("Customer", "Checkout")
+ * @Association("Admin", "Manage Inventory")
+ * @Association("Admin", "View Reports")
+ *
+ * @Includes("Checkout", "Process Payment")
+ */
+class OnlineStoreDiagram {
+
+    // Actor: Customer
+    executeBrowseProducts() {
+        console.log("Customer is browsing products.");
+        return true;
+    }
+
+    executeAddToCart() {
+        console.log("Customer added an item to the cart.");
+        return true;
+    }
+
+    executeCheckout() {
+        this.executeProcessPayment(); // <<include>>
+        console.log("Customer completed checkout.");
+        return true;
+    }
+
+    // Included use case (shared)
+    executeProcessPayment() {
+        console.log("Processing payment...");
+        return true;
+    }
+
+    // Actor: Admin
+    executeManageInventory() {
+        console.log("Admin is managing inventory.");
+        return true;
+    }
+
+    executeViewReports() {
+        console.log("Admin is viewing reports.");
+        return true;
+    }
+}
+
+// Runner
+const store = new OnlineStoreDiagram();
+store.executeBrowseProducts();
+store.executeAddToCart();
+store.executeCheckout();
+store.executeManageInventory();
+store.executeViewReports();`,
   },
 
   sequence: {
@@ -442,7 +450,7 @@ const DIAGRAMS = [
       { name: 'Generalization', arrow: 'Admin --|> User', desc: 'Admin is a specialized version of User and inherits their use cases.' },
     ],
     howToConnect: `Select an Actor or Use Case element, then drag from the blue dots on its border to another element. For include and extend relationships, draw the line and then change the type using the Properties panel.`,
-    codeNote: `Each sample has two parts: the top half is the annotation code you paste into "Code to Diagram" to build the diagram. The bottom half (commented out) is what Generate Code produces from that diagram. Use @Actor for stick figures, @UseCase for ovals, @Association for connecting lines, @Includes for <<include>> arrows, and @Extends for <<extend>> arrows.`,
+    codeNote: `Each sample is a real, runnable file you can paste directly into "Code to Diagram". The annotations (@Actor, @UseCase, @Association, @Includes, @Extends) sit inside the class docblock comment so they work as documentation AND as diagram instructions at the same time. No comment-per-line required.`,
     sampleLangs: ['Java', 'Python', 'JavaScript'],
   },
   {
