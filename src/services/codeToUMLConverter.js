@@ -4,8 +4,8 @@
  * ============================================================
  *
  * WHAT THIS FILE DOES (Layman's):
- * This file reads actual source code (Java, Python, JavaScript, or
- * PlantUML diagrams) and reverse-engineers it into a visual UML
+ * This file reads actual source code (Java, Python, or JavaScript)
+ * and reverse-engineers it into a visual UML
  * diagram model. Think of it like a blueprint scanner — you feed it
  * finished code and it draws the architectural diagram for you.
  *
@@ -50,7 +50,7 @@ class CodeToUMLConverter {
    * Every other method in this file ultimately serves this one.
    *
    * @param {string} sourceCode - Raw source code to analyze
-   * @param {string} language   - 'Java' | 'Python' | 'JavaScript' | 'plantuml'
+   * @param {string} language   - 'Java' | 'Python' | 'JavaScript'
    * @returns {object}          - { success, message, elements, connections, patterns, ast, metadata }
    */
   static convertCodeToUML(sourceCode, language = 'Java') {
@@ -162,30 +162,13 @@ class CodeToUMLConverter {
    * LAYMAN'S: The router — figures out what language you gave it
    * and hands off to the right specialist parser.
    *
-   * TECHNICAL: First checks for PlantUML markers (classDiagram keyword,
-   * or class + { combination). If not PlantUML, dispatches by language string.
+   * TECHNICAL: Dispatches by language string to the correct parser.
    * Defaults to Java parser for unknown languages.
    *
    * RELATIONSHIP: Called by convertCodeToUML() in Step 1.
-   * Delegates to parseJavaAST / parsePythonAST / parseJavaScriptAST / parsePlantUMLAST.
+   * Delegates to parseJavaAST / parsePythonAST / parseJavaScriptAST.
    */
   static parseSourceCode(sourceCode, language) {
-    // Fix #16: PlantUML auto-detect — only fire on definitive PlantUML markers,
-    // NOT on bare 'class {' which matches Java/JS/Python classes.
-    const isDefinitivelyPlantUML = (
-      sourceCode.includes('@startuml') ||
-      sourceCode.includes('classDiagram') ||
-      sourceCode.includes('sequenceDiagram') ||
-      /^\s*actor\s+\w/m.test(sourceCode) ||
-      /^\s*participant\s+/m.test(sourceCode) ||
-      /^\s*usecase\s+/im.test(sourceCode) ||
-      /(?:^|\n)\s*\w+\s*->+\s*\w+\s*:/m.test(sourceCode) ||
-      /^\\s*class\\s+\\w+\\s*\\{[^}]*<</.test(sourceCode)
-    );
-    if (isDefinitivelyPlantUML) {
-      return this.parsePlantUMLAST(sourceCode);
-    }
-
     // ── Annotation-based use case detection ──────────────────────────────
     // Must run BEFORE the language switch so Java/Python/JS files that use
     // @Actor / @UseCase annotations are routed to the use case parser
@@ -207,7 +190,6 @@ class CodeToUMLConverter {
       case 'python':     return this.parsePythonAST(sourceCode);
       case 'javascript':
       case 'js':         return this.parseJavaScriptAST(sourceCode);
-      case 'plantuml':   return this.parsePlantUMLAST(sourceCode);
       default:           return this.parseJavaAST(sourceCode); // Java as universal fallback
     }
   }
@@ -670,22 +652,6 @@ class CodeToUMLConverter {
   }
 
   // ============================================================
-  // PlantUML PARSER
-  // LAYMAN'S: PlantUML is a text format for describing diagrams.
-  // This section reads those descriptions and extracts the same
-  // class structure as the code parsers above.
-  // ============================================================
-
-  /**
-   * parsePlantUMLAST(sourceCode)
-   * LAYMAN'S: Reads PlantUML class diagram text and extracts class definitions.
-   * TECHNICAL: Two-pass — first extracts class bodies, then resolves
-   * relationship arrows (which update extends/implements on class nodes).
-   *
-   * RELATIONSHIP: Called by parseSourceCode() for PlantUML input.
-   */
-
-  // ============================================================
   // parseAnnotatedUseCaseAST
   // ============================================================
   // Parses Java, Python, or JavaScript files that use special
@@ -789,349 +755,6 @@ class CodeToUMLConverter {
     return ast;
   }
 
-  static parsePlantUMLAST(sourceCode) {
-    const ast = { classes: [], imports: [] };
-
-    const cleanCode = sourceCode.replace(/@startuml[\s\S]*?\n/i, '')
-                                .replace(/@enduml.*/i, '')
-                                .replace(/classDiagram\s*/i, '')
-                                .trim();
-
-    // ── Detect diagram type from keywords ────────────────────
-    const isSequence = /^\s*(participant|actor|->|-->|->>)/m.test(cleanCode);
-    const isUseCase  = /^\s*(actor\s+\w|usecase\s+|\([\w\s]+\))/m.test(cleanCode) &&
-                       !isSequence;
-
-    if (isSequence) {
-      return this.parsePlantUMLSequenceAST(cleanCode);
-    }
-
-    if (isUseCase) {
-      return this.parsePlantUMLUseCaseAST(cleanCode);
-    }
-
-    // ── Default: class diagram parser ─────────────────────────
-    const classRegex = /class\s+(\w+)\s*(\{[^}]*\})?/g;
-    let match;
-
-    while ((match = classRegex.exec(cleanCode)) !== null) {
-      const [, className, classBody] = match;
-      ast.classes.push({
-        name: className,
-        elementType: 'class',
-        extends: null,
-        implements: [],
-        attributes: this.extractPlantUMLAttributes(classBody || ''),
-        methods: this.extractPlantUMLMethods(classBody || ''),
-        isAbstract: false
-      });
-    }
-
-    this.extractPlantUMLRelationships(cleanCode, ast.classes);
-    return ast;
-  }
-
-  /**
-   * parsePlantUMLUseCaseAST(sourceCode)
-   * Parses PlantUML use case diagram syntax:
-   *   actor Customer
-   *   usecase (Login)
-   *   Customer --> (Login)
-   */
-  static parsePlantUMLUseCaseAST(sourceCode) {
-    const ast = { classes: [], imports: [] };
-    const seen     = new Set(); // element name keys already added
-    const aliasMap = {};        // alias → name key  e.g. "Search" → "Searchdocsfulltext"
-    const labelMap = {};        // alias → display label e.g. "Search" → "Search docs full text"
-
-    // ── Helper: normalise a raw token to a lookup key ─────────────────────
-    // Strips parens, trims, collapses spaces so "Search docs full text" → "Searchdocsfulltext"
-    const toKey = (raw) => raw.replace(/[()]/g, '').trim().replace(/\s+/g, '');
-
-    // ── 1. Parse actors ───────────────────────────────────────────────────
-    // Handles:  actor "Site User" as SiteUser
-    //           actor Webmaster
-    const actorRegex = /^actor\s+"?([^"\n]+?)"?\s*(?:as\s+(\w+))?\s*$/gm;
-    let match;
-
-    while ((match = actorRegex.exec(sourceCode)) !== null) {
-      const label = match[1].trim();
-      const alias = match[2] || null;
-      const key   = alias || toKey(label);
-
-      if (alias) {
-        aliasMap[alias] = key;
-        labelMap[alias] = label;
-      }
-      aliasMap[toKey(label)] = key; // also map by label key
-
-      if (!seen.has(key)) {
-        seen.add(key);
-        ast.classes.push({
-          name: key, label,
-          elementType: 'actor',
-          extends: null, implements: [],
-          attributes: [], methods: [],
-          isAbstract: false, _rels: []
-        });
-      }
-    }
-
-    // ── 2. Parse use case declarations ────────────────────────────────────
-    // Handles:  (Search docs full text) as (Search)
-    //           (Log in)
-    //           usecase (Browse docs)
-    // IMPORTANT: only match lines that declare a use case — NOT alias-only references
-    // We detect declarations by requiring the full-text label to appear
-    // i.e. the match must appear on lines that use "as" OR have a multi-word label
-    const ucDeclRegex = /^\s*(?:usecase\s+)?\(([^)]+)\)\s*(?:as\s+\((\w+)\))?\s*$/gm;
-
-    while ((match = ucDeclRegex.exec(sourceCode)) !== null) {
-      const label = match[1].trim();
-      const alias = match[2] || null;
-      const key   = alias || toKey(label);
-
-      if (alias) {
-        aliasMap[alias] = key;
-        labelMap[alias] = label;
-      }
-      aliasMap[toKey(label)] = key;
-
-      if (!seen.has(key)) {
-        seen.add(key);
-        ast.classes.push({
-          name: key, label,
-          elementType: 'usecase',
-          extends: null, implements: [],
-          attributes: [], methods: [],
-          isAbstract: false, _rels: []
-        });
-      }
-    }
-
-    // ── 3. Helper: resolve any token to an element ────────────────────────
-    // Handles plain names (SiteUser), aliases (Search),
-    // parenthesised aliases ((Search)), full labels ("Search docs full text")
-    const findEl = (raw) => {
-      const cleaned = raw.replace(/[()]/g, '').trim();
-      const key     = toKey(cleaned);
-
-      // Direct key match
-      let el = ast.classes.find(c => c.name === key);
-      if (el) return el;
-
-      // Alias map lookup
-      const mappedKey = aliasMap[cleaned] || aliasMap[key];
-      if (mappedKey) return ast.classes.find(c => c.name === mappedKey);
-
-      // Label match (fallback)
-      return ast.classes.find(c => c.label === cleaned);
-    };
-
-    // ── 4. Parse relationships ────────────────────────────────────────────
-    // Handles:
-    //   SiteUser --> (Search)
-    //   (Search) --> (Download)
-    //   (Upload) .> (ManageFolders)
-    //   (AddUser) ..> (AddCompany)
-    //   (UC1) --> (UC2) : <<include>>
-    const relRegex = /^\s*(\w[\w\s]*|\([^)]+\))\s*(-->|--|\.\.>|\.>|\.\.)\s*(\w[\w\s]*|\([^)]+\))(?:\s*:\s*(.+))?\s*$/gm;
-
-    while ((match = relRegex.exec(sourceCode)) !== null) {
-      const [, rawFrom, arrow, rawTo, label] = match;
-      const fromEl = findEl(rawFrom.trim());
-      const toEl   = findEl(rawTo.trim());
-
-      if (!fromEl || !toEl) continue;
-
-      const labelText = (label || '').trim().toLowerCase();
-      let connType  = 'association';
-      let connLabel = '';
-
-      if (arrow === '.>' || arrow === '..>' || labelText.includes('include')) {
-        connType  = 'include';
-        connLabel = '<<include>>';
-      } else if (arrow === '..' || labelText.includes('extend')) {
-        connType  = 'extend';
-        connLabel = '<<extend>>';
-      } else if (fromEl.elementType === 'usecase' && toEl.elementType === 'usecase') {
-        // usecase → usecase with plain --> is <<include>> by convention
-        connType  = 'include';
-        connLabel = '<<include>>';
-      }
-      // actor → usecase with --> stays as 'association' (solid line)
-
-      if (!fromEl._rels) fromEl._rels = [];
-      fromEl._rels.push({ targetName: toEl.name, connType, label: connLabel });
-    }
-
-    return ast;
-  }
-
-  /**
-   * parsePlantUMLSequenceAST(sourceCode)
-   * Parses PlantUML sequence diagram syntax:
-   *   participant "System" as S
-   *   actor Customer
-   *   Customer -> S : Login
-   */
-  static parsePlantUMLSequenceAST(sourceCode) {
-    const ast = { classes: [], imports: [], messages: [] };
-
-    // Parse explicit participant/actor declarations
-    // Handles: actor User, participant Browser, participant "Auth Server" as Auth
-    const declRegex = /^(participant|actor)\s+"?([^"\n]+?)"?\s*(?:as\s+(\w+))?$/gm;
-    let match;
-    const seen     = new Set();
-    const aliasMap = {};
-
-    while ((match = declRegex.exec(sourceCode)) !== null) {
-      const kind  = match[1].toLowerCase();
-      const label = match[2].trim();
-      const alias = match[3] || null;
-      const name  = alias || label.replace(/\s+/g, '');
-
-      if (alias) aliasMap[alias] = name;
-
-      if (!seen.has(name)) {
-        seen.add(name);
-        ast.classes.push({
-          name,
-          label,
-          elementType: kind === 'actor' ? 'actor' : 'lifeline',
-          extends: null,
-          implements: [],
-          attributes: [],
-          methods: [],
-          isAbstract: false,
-          _rels: []
-        });
-      }
-    }
-
-    // Parse message lines — also picks up undeclared participants
-    const msgRegex = /^(\w+)\s*(->>?|-->>?|->x)\s*(\w+)\s*(?::\s*(.+))?$/gm;
-
-    while ((match = msgRegex.exec(sourceCode)) !== null) {
-      const [, fromRaw, arrow, toRaw, label] = match;
-      const from     = aliasMap[fromRaw] || fromRaw;
-      const to       = aliasMap[toRaw]   || toRaw;
-      const msgLabel = (label || '').trim();
-
-      // Register implicit participants
-      for (const [name, raw] of [[from, fromRaw], [to, toRaw]]) {
-        if (!seen.has(name)) {
-          seen.add(name);
-          ast.classes.push({
-            name, label: raw,
-            elementType: 'lifeline',
-            extends: null, implements: [],
-            attributes: [], methods: [],
-            isAbstract: false, _rels: []
-          });
-        }
-      }
-
-      // Store message as a _rel on the source participant
-      const fromEl = ast.classes.find(c => c.name === from);
-      if (fromEl) {
-        if (!fromEl._rels) fromEl._rels = [];
-        const connType = arrow.startsWith('--') ? 'return' : 'message';
-        fromEl._rels.push({ targetName: to, arrow, connType, label: msgLabel });
-      }
-
-      ast.messages.push({ from, to, arrow, label: msgLabel });
-    }
-
-    return ast;
-  }
-
-  /**
-   * extractPlantUMLAttributes(classBody)
-   * LAYMAN'S: Reads PlantUML field lines like "+String name" or "-int age".
-   * TECHNICAL: + = public, - = private, # = protected.
-   *
-   * RELATIONSHIP: Called by parsePlantUMLAST().
-   */
-  static extractPlantUMLAttributes(classBody) {
-    const attributes = [];
-    if (!classBody) return attributes;
-
-    const attrRegex = /([+\-#])(\w+)\s+(\w+)/g;
-    let match;
-    const seen = new Set();
-
-    while ((match = attrRegex.exec(classBody)) !== null) {
-      const [, visibility, type, name] = match;
-      if (!seen.has(name)) {
-        seen.add(name);
-        attributes.push({
-          name, type,
-          visibility: visibility === '+' ? 'public' : visibility === '-' ? 'private' : 'protected',
-          isStatic: false
-        });
-      }
-    }
-
-    return attributes;
-  }
-
-  /**
-   * extractPlantUMLMethods(classBody)
-   * LAYMAN'S: Reads PlantUML method lines like "+checkout()" or "#getName(): String".
-   * TECHNICAL: Distinguished from attributes by parentheses. Return type is optional.
-   *
-   * RELATIONSHIP: Called by parsePlantUMLAST().
-   */
-  static extractPlantUMLMethods(classBody) {
-    const methods = [];
-    if (!classBody) return methods;
-
-    const methodRegex = /([+\-#])\s*([\w]+)\s*\(([^)]*)\)\s*(?::\s*(\w+))?/g;
-    let match;
-    const seen = new Set();
-
-    while ((match = methodRegex.exec(classBody)) !== null) {
-      const [, visibility, methodName, params, returnType] = match;
-      if (!seen.has(methodName)) {
-        seen.add(methodName);
-        methods.push({
-          name: methodName,
-          returnType: returnType || 'void',
-          visibility: visibility === '+' ? 'public' : visibility === '-' ? 'private' : 'protected',
-          parameters: params,
-          isStatic: false
-        });
-      }
-    }
-
-    return methods;
-  }
-
-  /**
-   * extractPlantUMLRelationships(sourceCode, classes)
-   * LAYMAN'S: Reads arrow lines like "Library --* Book" and uses them to
-   * set which classes extend or implement each other.
-   * TECHNICAL: '|' in arrow = inheritance/realization. Mutates classes in-place.
-   *
-   * RELATIONSHIP: Called by parsePlantUMLAST() as a second pass.
-   */
-  static extractPlantUMLRelationships(sourceCode, classes) {
-    const relationshipRegex = /(\w+)\s+([<|]*-+[>|*]?)\s+(\w+)\s*:\s*(\w+)?/g;
-    let match;
-
-    while ((match = relationshipRegex.exec(sourceCode)) !== null) {
-      const [, source, arrow, target] = match;
-      if (arrow.includes('|')) {
-        const sourceClass = classes.find(c => c.name === source);
-        if (sourceClass) {
-          if (arrow.includes('<')) sourceClass.extends = target;
-          else sourceClass.implements = [target];
-        }
-      }
-    }
-  }
-
   // ============================================================
   // ALGORITHM B: RELATIONSHIP DETECTOR
   // LAYMAN'S: After finding all classes, this section figures out
@@ -1173,8 +796,8 @@ class CodeToUMLConverter {
 
     classes.forEach((sourceClass) => {
 
-      // ── PlantUML use case / sequence _rels (pre-parsed by PlantUML parsers) ──
-      // Only process _rels if this is a PlantUML element (has elementType set)
+      // ── Annotated use case / sequence _rels (pre-parsed by parseAnnotatedUseCaseAST) ──
+      // Only process _rels if this is a non-class element (actor, usecase, lifeline)
       if (sourceClass.elementType && sourceClass.elementType !== 'class' && sourceClass.elementType !== 'abstract') {
         // Process any stored _rels (messages, associations)
         if (sourceClass._rels?.length > 0) {
@@ -1201,7 +824,7 @@ class CodeToUMLConverter {
           }
         });
         }
-        return; // Skip code-based rules for PlantUML elements
+        return; // Skip code-based rules for non-class elements
       }
 
       // 1. INHERITANCE
@@ -1419,7 +1042,7 @@ class CodeToUMLConverter {
       const col = idx % COLS;
       const row = Math.floor(idx / COLS);
 
-      // Use elementType if set (actor/usecase/lifeline from PlantUML parsers),
+      // Use elementType if set (actor/usecase/lifeline from annotated use case parser),
       // otherwise fall back to abstract/class based on isAbstract flag.
       const resolvedType = cls.elementType && cls.elementType !== 'class'
         ? cls.elementType

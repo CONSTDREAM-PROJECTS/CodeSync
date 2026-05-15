@@ -2,6 +2,369 @@ import React, { useState, useRef, useCallback } from 'react';
 import { Upload, AlertCircle, CheckCircle, FileCode } from 'lucide-react';
 import CodeToUMLConverter from '../services/codeToUMLConverter';
 
+// ── Per-diagram-type, per-language example snippets ───────────────────────────
+const EXAMPLE_CODE = {
+
+  // ── CLASS DIAGRAM ──────────────────────────────────────────────────────────
+  class: {
+    Java: `public class Animal {
+  private String name;
+  private int age;
+
+  public Animal(String name, int age) {
+    this.name = name;
+    this.age = age;
+  }
+
+  public String getName() { return name; }
+  public void makeSound() {}
+}
+
+public class Dog extends Animal {
+  private String breed;
+
+  public Dog(String name, int age, String breed) {
+    super(name, age);
+    this.breed = breed;
+  }
+
+  @Override
+  public void makeSound() {
+    System.out.println("Woof!");
+  }
+}
+
+public interface Trainable {
+  void train(String command);
+  boolean isTrained();
+}`,
+
+    Python: `class Animal:
+    def __init__(self, name: str, age: int):
+        self.name = name
+        self.age = age
+
+    def make_sound(self):
+        pass
+
+
+class Dog(Animal):
+    def __init__(self, name: str, age: int, breed: str):
+        super().__init__(name, age)
+        self.breed = breed
+
+    def make_sound(self):
+        print("Woof!")
+
+
+class Cat(Animal):
+    def __init__(self, name: str, age: int):
+        super().__init__(name, age)
+
+    def make_sound(self):
+        print("Meow!")`,
+
+    JavaScript: `class Animal {
+  constructor(name, age) {
+    this.name = name;
+    this.age = age;
+  }
+
+  makeSound() {}
+}
+
+class Dog extends Animal {
+  constructor(name, age, breed) {
+    super(name, age);
+    this.breed = breed;
+  }
+
+  makeSound() {
+    console.log("Woof!");
+  }
+}
+
+class Cat extends Animal {
+  constructor(name, age) {
+    super(name, age);
+  }
+
+  makeSound() {
+    console.log("Meow!");
+  }
+}`,
+  },
+
+  // ── USE CASE DIAGRAM ───────────────────────────────────────────────────────
+  // Uses @Actor / @UseCase / @Association / @Includes / @Extends annotations.
+  // The converter detects these and routes to parseAnnotatedUseCaseAST().
+  // Java/JS: annotations on real class files. Python: # prefix on a module.
+  usecase: {
+    Java: `// Online Banking System — Use Case Diagram
+// Paste this into the converter while on the Use Case tab.
+
+@Actor("Customer")
+@Actor("Bank Admin")
+
+@UseCase("Log In")
+@UseCase("Check Balance")
+@UseCase("Transfer Funds")
+@UseCase("View Transaction History")
+@UseCase("Manage Account")
+@UseCase("Verify Identity")
+
+@Association("Customer", "Log In")
+@Association("Customer", "Check Balance")
+@Association("Customer", "Transfer Funds")
+@Association("Customer", "View Transaction History")
+@Association("Bank Admin", "View Transaction History")
+@Association("Bank Admin", "Manage Account")
+
+@Includes("Transfer Funds", "Verify Identity")
+@Includes("Log In", "Verify Identity")
+
+public class OnlineBankingSystem {
+
+    public void login(String username, String password) {
+        verifyIdentity(username, password);
+    }
+
+    public double checkBalance(String accountId) {
+        return 0.0;
+    }
+
+    public boolean transferFunds(String from, String to, double amount) {
+        verifyIdentity(from, null);
+        return true;
+    }
+
+    public void viewTransactionHistory(String accountId) {}
+
+    public void manageAccount(String accountId) {}
+
+    private boolean verifyIdentity(String user, String pass) {
+        return true;
+    }
+}`,
+
+    Python: `# Online Shopping System — Use Case Diagram
+# Paste this into the converter while on the Use Case tab.
+
+# @Actor("Customer")
+# @Actor("Admin")
+
+# @UseCase("Browse Products")
+# @UseCase("Add to Cart")
+# @UseCase("Checkout")
+# @UseCase("Track Order")
+# @UseCase("Process Payment")
+# @UseCase("Manage Inventory")
+
+# @Association("Customer", "Browse Products")
+# @Association("Customer", "Add to Cart")
+# @Association("Customer", "Checkout")
+# @Association("Customer", "Track Order")
+# @Association("Admin", "Manage Inventory")
+# @Association("Admin", "Track Order")
+
+# @Includes("Checkout", "Process Payment")
+
+class OnlineShoppingSystem:
+    def browse_products(self):
+        return []
+
+    def add_to_cart(self, product_id: str, quantity: int):
+        pass
+
+    def checkout(self, cart_id: str):
+        self.process_payment(cart_id)
+
+    def track_order(self, order_id: str):
+        return {}
+
+    def process_payment(self, cart_id: str):
+        return True
+
+    def manage_inventory(self, product_id: str, stock: int):
+        pass`,
+
+    JavaScript: `// Task Management App — Use Case Diagram
+// Paste this into the converter while on the Use Case tab.
+
+// @Actor("User")
+// @Actor("Manager")
+
+// @UseCase("Create Task")
+// @UseCase("Assign Task")
+// @UseCase("Update Status")
+// @UseCase("View Dashboard")
+// @UseCase("Generate Report")
+// @UseCase("Send Notification")
+
+// @Association("User", "Create Task")
+// @Association("User", "Update Status")
+// @Association("User", "View Dashboard")
+// @Association("Manager", "Assign Task")
+// @Association("Manager", "View Dashboard")
+// @Association("Manager", "Generate Report")
+
+// @Includes("Assign Task", "Send Notification")
+// @Includes("Update Status", "Send Notification")
+
+class TaskManagementApp {
+  createTask(title, description) {
+    this.sendNotification("Task created: " + title);
+  }
+
+  assignTask(taskId, userId) {
+    this.sendNotification("Task assigned to " + userId);
+  }
+
+  updateStatus(taskId, status) {
+    this.sendNotification("Status updated: " + status);
+  }
+
+  viewDashboard(userId) {
+    return [];
+  }
+
+  generateReport(startDate, endDate) {
+    return {};
+  }
+
+  sendNotification(message) {
+    console.log(message);
+  }
+}`,
+  },
+
+  // ── SEQUENCE DIAGRAM ───────────────────────────────────────────────────────
+  // The converter's sequence parser detects class-to-class method calls via
+  // stored field references (this.field.method() / self.field.method()).
+  // Each class becomes a lifeline; calls between them become messages.
+  sequence: {
+    Java: `// User Login Flow — Sequence Diagram
+// Each class becomes a lifeline. Method calls between classes become messages.
+
+public class LoginPage {
+  private AuthService authService;
+  private UserSession userSession;
+
+  public LoginPage(AuthService authService, UserSession userSession) {
+    this.authService = authService;
+    this.userSession = userSession;
+  }
+
+  public void submitLogin(String username, String password) {
+    String token = authService.authenticate(username, password);
+    if (token != null) {
+      userSession.startSession(token);
+    }
+  }
+}
+
+public class AuthService {
+  private UserRepository userRepository;
+
+  public AuthService(UserRepository userRepository) {
+    this.userRepository = userRepository;
+  }
+
+  public String authenticate(String username, String password) {
+    boolean valid = userRepository.validateCredentials(username, password);
+    return valid ? "token_abc" : null;
+  }
+}
+
+public class UserRepository {
+  public boolean validateCredentials(String username, String password) {
+    return true;
+  }
+}
+
+public class UserSession {
+  public void startSession(String token) {
+    System.out.println("Session started: " + token);
+  }
+}`,
+
+    Python: `# E-Commerce Order Flow — Sequence Diagram
+# Each class becomes a lifeline. self.field.method() calls become messages.
+
+class OrderController:
+    def __init__(self, inventory: InventoryService, payment: PaymentService):
+        self.inventory = inventory
+        self.payment = payment
+
+    def place_order(self, product_id: str, quantity: int, card: str):
+        available = self.inventory.check_stock(product_id, quantity)
+        if available:
+            confirmed = self.payment.charge(card, quantity * 10.0)
+            if confirmed:
+                self.inventory.reserve(product_id, quantity)
+
+
+class InventoryService:
+    def check_stock(self, product_id: str, quantity: int):
+        return True
+
+    def reserve(self, product_id: str, quantity: int):
+        pass
+
+
+class PaymentService:
+    def charge(self, card: str, amount: float):
+        return True`,
+
+    JavaScript: `// API Request Flow — Sequence Diagram
+// Each class becomes a lifeline. this.field.method() calls become messages.
+
+class ApiController {
+  constructor(authMiddleware, userService, responseHandler) {
+    this.authMiddleware = authMiddleware;
+    this.userService = userService;
+    this.responseHandler = responseHandler;
+  }
+
+  handleRequest(token, userId) {
+    const valid = this.authMiddleware.validateToken(token);
+    if (valid) {
+      const user = this.userService.findById(userId);
+      this.responseHandler.send(user);
+    }
+  }
+}
+
+class AuthMiddleware {
+  constructor(tokenStore) {
+    this.tokenStore = tokenStore;
+  }
+
+  validateToken(token) {
+    return this.tokenStore.lookup(token);
+  }
+}
+
+class TokenStore {
+  lookup(token) {
+    return token != null;
+  }
+}
+
+class UserService {
+  findById(userId) {
+    return { id: userId, name: "Alice" };
+  }
+}
+
+class ResponseHandler {
+  send(data) {
+    console.log(data);
+  }
+}`,
+  },
+};
+
 const CodeImportModal = ({ onImport, onClose, diagramType = 'class' }) => {
   const [sourceCode,       setSourceCode]       = useState('');
   const [language,         setLanguage]         = useState('Java');
@@ -18,7 +381,6 @@ const CodeImportModal = ({ onImport, onClose, diagramType = 'class' }) => {
     if (f.endsWith('.java'))                         return 'Java';
     if (f.endsWith('.py'))                           return 'Python';
     if (f.endsWith('.js') || f.endsWith('.jsx'))    return 'JavaScript';
-    if (f.endsWith('.puml') || f.endsWith('.plantuml')) return 'PlantUML';
     return null; // unknown — keep current selection
   };
 
@@ -91,8 +453,8 @@ const CodeImportModal = ({ onImport, onClose, diagramType = 'class' }) => {
       return;
     }
     setIsConverting(true);
-    // Route to sequence parser when on Sequence Diagram and using Java/Python/JS
-    const isSequenceMode = diagramType === 'sequence' && language !== 'PlantUML';
+    // Route to sequence parser when on Sequence Diagram
+    const isSequenceMode = diagramType === 'sequence';
     const result = isSequenceMode
       ? CodeToUMLConverter.convertCodeToUMLSequence(sourceCode, language)
       : CodeToUMLConverter.convertCodeToUML(sourceCode, language);
@@ -123,6 +485,16 @@ const CodeImportModal = ({ onImport, onClose, diagramType = 'class' }) => {
     setSourceCode('');
     setConversionResult(null);
     setDroppedFileName('');
+  };
+
+  const handleLoadExample = () => {
+    // Pick the right bucket based on which diagram tab is active
+    const typeKey = ['usecase', 'sequence'].includes(diagramType) ? diagramType : 'class';
+    const byType  = EXAMPLE_CODE[typeKey] || EXAMPLE_CODE.class;
+    const example = byType[language] || byType.Java;
+    setSourceCode(example);
+    setDroppedFileName('');
+    setConversionResult(null);
   };
 
   return (
@@ -165,7 +537,6 @@ const CodeImportModal = ({ onImport, onClose, diagramType = 'class' }) => {
               <option value="Java">Java</option>
               <option value="Python">Python</option>
               <option value="JavaScript">JavaScript</option>
-              <option value="PlantUML">PlantUML</option>
             </select>
           </div>
 
@@ -173,9 +544,19 @@ const CodeImportModal = ({ onImport, onClose, diagramType = 'class' }) => {
           {/* This is the primary drop target with visual feedback.
               The textarea below is a secondary drop target for convenience. */}
           <div>
-            <label className="text-sm font-semibold text-gray-300 block mb-2">
-              Source Code or Diagram Definition
-            </label>
+            <div className="flex items-center justify-between mb-2">
+              <label className="text-sm font-semibold text-gray-300">
+                Source Code or Diagram Definition
+              </label>
+              <button
+                onClick={handleLoadExample}
+                disabled={isConverting}
+                className="text-xs px-2.5 py-1 rounded bg-[#3c3c3c] hover:bg-[#4a4a4f] text-[#9cdcfe] hover:text-white border border-[#3e3e42] transition-colors disabled:opacity-50"
+                title="Fill the editor with a working example for the selected language"
+              >
+                Load Example
+              </button>
+            </div>
 
             {/* Drop zone overlay — shown when a file is being dragged */}
             <div className="relative">
@@ -186,7 +567,11 @@ const CodeImportModal = ({ onImport, onClose, diagramType = 'class' }) => {
                 onDragOver={handleDragOver}
                 onDrop={handleDrop}
                 placeholder={
-                  `Drop a .${language === 'Java' ? 'java' : language === 'Python' ? 'py' : language === 'PlantUML' ? 'puml' : 'js'} file here, or paste your ${language === 'PlantUML' ? 'diagram definition' : 'source code'}...`
+                  diagramType === 'usecase'
+                    ? 'Paste annotated use case code here, or click Load Example...'
+                    : diagramType === 'sequence'
+                    ? 'Paste class code with method calls here, or click Load Example...'
+                    : `Drop a .${language === 'Java' ? 'java' : language === 'Python' ? 'py' : 'js'} file here, or paste your source code...`
                 }
                 disabled={isConverting}
                 className={`w-full h-64 bg-[#1e1e1e] text-white px-3 py-2 rounded border font-mono text-sm
@@ -203,7 +588,7 @@ const CodeImportModal = ({ onImport, onClose, diagramType = 'class' }) => {
                   <FileCode size={40} className="text-[#007acc] mb-3" />
                   <p className="text-[#007acc] font-semibold text-lg">Drop your file here</p>
                   <p className="text-gray-400 text-sm mt-1">
-                    Supports .java · .py · .js · .jsx · .puml
+                    Supports .java · .py · .js · .jsx
                   </p>
                 </div>
               )}
@@ -219,9 +604,7 @@ const CodeImportModal = ({ onImport, onClose, diagramType = 'class' }) => {
             )}
 
             <p className="text-xs text-gray-400 mt-1">
-              {language === 'PlantUML'
-                ? 'PlantUML format: starts with @startuml, ends with @enduml'
-                : 'Supported: classes, attributes, methods, inheritance, interfaces, and composition'}
+              Supported: classes, attributes, methods, inheritance, interfaces, and composition
             </p>
           </div>
 
@@ -229,12 +612,12 @@ const CodeImportModal = ({ onImport, onClose, diagramType = 'class' }) => {
           <div className="flex items-center gap-3">
             <label className="flex-1 cursor-pointer">
               <div className="bg-[#3c3c3c] hover:bg-[#4a4a4f] text-white px-4 py-2 rounded border border-[#3e3e42] transition-colors text-center text-sm">
-                📁 Choose File (.java, .py, .js, .puml)
+                📁 Choose File (.java, .py, .js)
               </div>
               <input
                 ref={fileInputRef}
                 type="file"
-                accept=".java,.py,.js,.jsx,.ts,.tsx,.puml,.plantuml"
+                accept=".java,.py,.js,.jsx,.ts,.tsx"
                 onChange={handleFileUpload}
                 className="hidden"
                 disabled={isConverting}
