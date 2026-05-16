@@ -431,6 +431,26 @@ const DIAGRAMS = [
     howToConnect: `Click a class on the canvas to select it, then hover until you see the blue connection dots appear on its edges. Click and drag from one of those dots to another class to draw a relationship. After drawing, select the line to change its type in the Properties panel on the right.`,
     codeNote: `Paste a Java, Python, or JavaScript file. The tool reads your class definitions, attributes, methods, and inheritance and builds the diagram automatically.`,
     sampleLangs: ['Java', 'Python', 'JavaScript'],
+    toolReference: {
+      modes: [
+        { name: 'Select', icon: '↖', desc: 'Switch to selection mode. Click any element to select and move it. Drag an empty area to pan the canvas.' },
+        { name: 'Delete', icon: '✕', desc: 'Click any element or connection line to permanently remove it from the diagram.' },
+      ],
+      elements: [
+        { name: 'Class',          icon: '▣', desc: 'Adds a class box with three sections name at top, attributes in the middle, and methods at the bottom. Double-click to edit.' },
+        { name: 'Interface',      icon: '◇', desc: 'Adds an interface labeled <<interface>>. Defines a contract of methods that implementing classes must provide.' },
+        { name: 'Abstract Class', icon: '◈', desc: 'Adds an abstract class labeled <<abstract>>. Cannot be instantiated it must be extended by a concrete subclass.' },
+        { name: 'Enum',           icon: '≡', desc: 'Adds an enumeration labeled <<enum>>. Holds a fixed list of named constants, e.g. Status = { ACTIVE, INACTIVE }.' },
+      ],
+      relations: [
+        { name: 'Association',  icon: '→',    desc: 'A plain directional link. Class A holds a reference to Class B the most general relationship.' },
+        { name: 'Inheritance',  icon: '▷',    desc: 'Hollow-triangle arrow. The child extends the parent and inherits all its attributes and methods.' },
+        { name: 'Realization',  icon: '◁--',  desc: 'Dashed line with hollow triangle. A class promises to implement all methods declared in an interface.' },
+        { name: 'Aggregation',  icon: '◇→',   desc: 'Hollow-diamond arrow. A has-a link where child objects can exist independently of the parent.' },
+        { name: 'Composition',  icon: '◆→',   desc: 'Filled-diamond arrow. Child objects are owned by the parent and cannot exist without it.' },
+        { name: 'Dependency',   icon: '-->',   desc: 'Dashed arrow. A temporary usage one class uses another only inside a method, not as a stored field.' },
+      ],
+    },
   },
   {
     id: 'usecase',
@@ -452,6 +472,23 @@ const DIAGRAMS = [
     howToConnect: `Select an Actor or Use Case element, then drag from the blue dots on its border to another element. For include and extend relationships, draw the line and then change the type using the Properties panel.`,
     codeNote: `Each sample is a real, runnable file you can paste directly into "Code to Diagram". The annotations (@Actor, @UseCase, @Association, @Includes, @Extends) sit inside the class docblock comment so they work as documentation AND as diagram instructions at the same time. No comment-per-line required.`,
     sampleLangs: ['Java', 'Python', 'JavaScript'],
+    toolReference: {
+      modes: [
+        { name: 'Select', icon: '↖', desc: 'Switch to selection mode. Click any element to select and move it.' },
+        { name: 'Delete', icon: '✕', desc: 'Click any element or connection to permanently remove it.' },
+      ],
+      elements: [
+        { name: 'Actor',           icon: '🧍', desc: 'A stick figure. Represents a person, organisation, or external system that interacts with yours.' },
+        { name: 'Use Case',        icon: '⬭',  desc: 'An oval. Represents an action or goal the system fulfils for an actor, e.g. "Place Order".' },
+        { name: 'System Boundary', icon: '▭',  desc: 'A rectangle wrapping all use cases. Clarifies what is inside your system versus outside it.' },
+      ],
+      relations: [
+        { name: 'Association',    icon: '→',    desc: 'A plain line connecting an actor to a use case the actor participates in that use case.' },
+        { name: 'Include',        icon: '-->>',  desc: 'Dashed arrow labeled <<include>>. One use case always triggers another as a mandatory step.' },
+        { name: 'Extend',         icon: '-->',   desc: 'Dashed arrow labeled <<extend>>. An optional flow that sometimes happens during a use case.' },
+        { name: 'Generalization', icon: '▷',    desc: 'Hollow-triangle arrow. One actor or use case is a specialised version of another.' },
+      ],
+    },
   },
   {
     id: 'sequence',
@@ -473,6 +510,23 @@ const DIAGRAMS = [
     howToConnect: `Add lifelines to the canvas first using the toolbar. Then select a lifeline and drag from its connection dot to another lifeline to draw a message arrow. Order matters, messages are drawn top to bottom, representing time flowing downward.`,
     codeNote: `Paste Java, Python, or JavaScript code with classes that hold references to each other and call each other's methods. The tool traces those method calls and turns them into message arrows between lifelines automatically.`,
     sampleLangs: ['Java', 'Python', 'JavaScript'],
+    toolReference: {
+      modes: [
+        { name: 'Select', icon: '↖', desc: 'Switch to selection mode. Click any element to select or move it.' },
+        { name: 'Delete', icon: '✕', desc: 'Click any element or message arrow to permanently remove it.' },
+      ],
+      elements: [
+        { name: 'Lifeline',       icon: '|',  desc: 'A vertical dashed line with a named box on top represents one participant in the conversation.' },
+        { name: 'Activation Bar', icon: '▬',  desc: 'A thin rectangle on a lifeline shows when that participant is actively doing work.' },
+        { name: 'Message',        icon: '→',  desc: 'A solid horizontal arrow a synchronous call where the sender waits for the receiver to finish.' },
+        { name: 'Return Message', icon: '- ->', desc: 'A dashed arrow going the other way the receiver sends a result or response back.' },
+      ],
+      relations: [
+        { name: 'Message',   icon: '→',    desc: 'Synchronous call from one lifeline to another. Time flows downward, so draw messages top to bottom.' },
+        { name: 'Return',    icon: '- ->', desc: 'Response from the receiver back to the caller. Usually paired with the message that triggered it.' },
+        { name: 'Self-call', icon: '↩',    desc: 'A lifeline calling one of its own methods the arrow loops back to the same lifeline.' },
+      ],
+    },
   },
 ];
 
@@ -581,7 +635,7 @@ export default function DocumentationModal({ onClose }) {
           <div className="flex items-center gap-3">
             <BookOpen size={20} className="text-[#007acc]" />
             <div>
-              <h2 className="text-lg font-bold text-white">User Manual</h2>
+              <h2 className="text-lg font-bold text-white">Documentation</h2>
               <p className="text-xs text-gray-400 mt-0.5">How the diagrams work and how to use Code to Diagram</p>
             </div>
           </div>
@@ -664,6 +718,70 @@ export default function DocumentationModal({ onClose }) {
           <Section title="How to draw connections">
             <p>{diagram.howToConnect}</p>
           </Section>
+
+
+          {/* Tool Reference */}
+          {diagram.toolReference && (
+            <Section title="Tool palette reference">
+              {/* Mode tools */}
+              <div className="mb-4">
+                <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Mode Tools</p>
+                <div className="space-y-2">
+                  {diagram.toolReference.modes.map(t => (
+                    <div key={t.name} className="flex gap-3 items-start">
+                      <span
+                        className="text-xs font-bold px-2 py-0.5 rounded flex-shrink-0 h-fit font-mono"
+                        style={{ background: '#2d2d30', border: '1px solid #555', color: '#ccc', minWidth: '70px', textAlign: 'center' }}
+                      >
+                        {t.icon} {t.name}
+                      </span>
+                      <span className="text-xs text-gray-300 leading-relaxed">{t.desc}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Element tools */}
+              <div className="mb-4">
+                <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Element Buttons</p>
+                <div className="space-y-2">
+                  {diagram.toolReference.elements.map(t => (
+                    <div key={t.name} className="flex gap-3 items-start">
+                      <span
+                        className="text-xs font-bold px-2 py-0.5 rounded flex-shrink-0 h-fit"
+                        style={{ background: '#2d2d30', border: `1px solid ${diagram.color}`, color: diagram.color, minWidth: '110px', textAlign: 'center' }}
+                      >
+                        {t.icon} {t.name}
+                      </span>
+                      <span className="text-xs text-gray-300 leading-relaxed">{t.desc}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Relation tools */}
+              <div>
+                <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Relation Buttons</p>
+                <div className="space-y-2">
+                  {diagram.toolReference.relations.map(t => (
+                    <div key={t.name} className="flex gap-3 items-start">
+                      <span
+                        className="text-xs font-bold px-2 py-0.5 rounded flex-shrink-0 h-fit font-mono"
+                        style={{ background: '#2d2d30', border: '1px solid #6a9fcc', color: '#9cdcfe', minWidth: '110px', textAlign: 'center' }}
+                      >
+                        {t.icon} {t.name}
+                      </span>
+                      <span className="text-xs text-gray-300 leading-relaxed">{t.desc}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <p className="mt-4 text-xs text-gray-500 italic">
+                💡 Tip: hover over any button in the palette to see a quick description without opening this manual.
+              </p>
+            </Section>
+          )}
 
           {/* Code to Diagram samples */}
           <Section title={`Code to Diagram: sample ${diagram.label.toLowerCase()} code`} defaultOpen>
