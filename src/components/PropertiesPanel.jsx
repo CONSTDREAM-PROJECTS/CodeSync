@@ -42,8 +42,8 @@
  * ============================================================
  */
 
-import React, { useState, useEffect, useMemo } from 'react';
-import { Trash2 } from 'lucide-react';
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
+import { Trash2, GitCompare, Eye } from 'lucide-react';
 
 /**
  * Fix #18: Lightweight syntax highlighter — no external library needed.
@@ -101,18 +101,222 @@ const TOKEN_COLORS = {
 };
 
 /**
- * SyntaxHighlightedCode({ code, language })
- * Renders a <pre> with inline-colored spans for each token.
+ * computeDiff(oldCode, newCode)
+ * -----------------------------
+ * LAYMAN'S: Compares two versions of generated code line-by-line and
+ *   tags each line as 'added', 'removed', 'changed', or 'unchanged'.
+ *   This powers the diff-highlight feature so users can instantly see
+ *   what changed in the code after editing the UML diagram.
+ *
+ * TECHNICAL: Implements a simple LCS (Longest Common Subsequence)-based
+ *   diff using a DP table on lines. Returns an array of diff entries:
+ *   { type: 'added'|'removed'|'unchanged', line: string, lineNum?: number }
+ *   'changed' blocks are pairs of removed+added lines with the same index.
  */
-const SyntaxHighlightedCode = ({ code, language }) => {
+function computeDiff(oldCode, newCode) {
+  if (!oldCode && !newCode) return [];
+  if (!oldCode) return newCode.split('\n').map(line => ({ type: 'added', line }));
+  if (!newCode) return oldCode.split('\n').map(line => ({ type: 'removed', line }));
+
+  const oldLines = oldCode.split('\n');
+  const newLines = newCode.split('\n');
+  const m = oldLines.length;
+  const n = newLines.length;
+
+  // Build LCS DP table
+  const dp = Array.from({ length: m + 1 }, () => new Array(n + 1).fill(0));
+  for (let i = 1; i <= m; i++) {
+    for (let j = 1; j <= n; j++) {
+      if (oldLines[i - 1] === newLines[j - 1]) {
+        dp[i][j] = dp[i - 1][j - 1] + 1;
+      } else {
+        dp[i][j] = Math.max(dp[i - 1][j], dp[i][j - 1]);
+      }
+    }
+  }
+
+  // Backtrack to build diff
+  const result = [];
+  let i = m, j = n;
+  while (i > 0 || j > 0) {
+    if (i > 0 && j > 0 && oldLines[i - 1] === newLines[j - 1]) {
+      result.unshift({ type: 'unchanged', line: oldLines[i - 1] });
+      i--; j--;
+    } else if (j > 0 && (i === 0 || dp[i][j - 1] >= dp[i - 1][j])) {
+      result.unshift({ type: 'added', line: newLines[j - 1] });
+      j--;
+    } else {
+      result.unshift({ type: 'removed', line: oldLines[i - 1] });
+      i--;
+    }
+  }
+
+  // Merge adjacent removed+added into 'changed' pairs for nicer display
+  const merged = [];
+  let k = 0;
+  while (k < result.length) {
+    if (
+      result[k].type === 'removed' &&
+      k + 1 < result.length &&
+      result[k + 1].type === 'added'
+    ) {
+      merged.push({ type: 'changed', oldLine: result[k].line, line: result[k + 1].line });
+      k += 2;
+    } else {
+      merged.push(result[k]);
+      k++;
+    }
+  }
+  return merged;
+}
+
+/** Counts added/removed/changed lines for the diff summary badge */
+function diffStats(diffLines) {
+  let added = 0, removed = 0, changed = 0;
+  for (const d of diffLines) {
+    if (d.type === 'added') added++;
+    else if (d.type === 'removed') removed++;
+    else if (d.type === 'changed') changed++;
+  }
+  return { added, removed, changed };
+}
+
+const DIFF_BG = {
+  added:     'rgba(40,167,69,0.18)',
+  removed:   'rgba(220,53,69,0.18)',
+  changed:   'rgba(255,193,7,0.15)',
+  unchanged: 'transparent',
+};
+const DIFF_BORDER = {
+  added:   '#28a745',
+  removed: '#dc3545',
+  changed: '#ffc107',
+};
+const DIFF_PREFIX = {
+  added:   '+',
+  removed: '-',
+  changed: '~',
+  unchanged: ' ',
+};
+
+/**
+ * SyntaxHighlightedCode({ code, prevCode, language, showDiff })
+ * -------------------------------------------------------------
+ * LAYMAN'S: Renders the generated code with syntax colouring. When
+ *   showDiff is true AND there is a previous version to compare against,
+ *   each line also gets a coloured background: green for new lines, red
+ *   for deleted lines, yellow for lines that were rewritten.
+ *
+ * TECHNICAL: When showDiff is false it renders exactly as before —
+ *   a flat token stream in a <pre>. When showDiff is true it switches
+ *   to a line-by-line render so each line can carry its own background
+ *   colour. The diff is computed via computeDiff() (LCS-based).
+ */
+const SyntaxHighlightedCode = ({ code, prevCode, language, showDiff }) => {
   const tokens = useMemo(() => highlightCode(code, language), [code, language]);
+
+  const diffLines = useMemo(() => {
+    if (!showDiff || !prevCode || prevCode === code) return null;
+    return computeDiff(prevCode, code);
+  }, [showDiff, prevCode, code, language]);
+
+  const preStyle = {
+    tabSize: 2,
+    margin: 0,
+    fontSize: '0.75rem',
+    lineHeight: '1.6',
+    fontFamily: 'monospace',
+    overflowX: 'auto',
+    overflowY: 'auto',
+    flex: 1,
+    background: '#1e1e1e',
+    padding: '0.75rem',
+    borderRadius: '0.25rem',
+  };
+
+  if (!diffLines) {
+    // Normal render — flat token stream
+    return (
+      <pre style={preStyle}>
+        {tokens.map((tok, i) => (
+          <span key={i} style={{ color: TOKEN_COLORS[tok.type] || TOKEN_COLORS.plain }}>
+            {tok.text}
+          </span>
+        ))}
+      </pre>
+    );
+  }
+
+  // Diff render — line by line
   return (
-    <pre className="flex-1 bg-[#1e1e1e] p-3 rounded text-xs overflow-auto font-mono leading-relaxed" style={{tabSize: 2}}>
-      {tokens.map((tok, i) => (
-        <span key={i} style={{ color: TOKEN_COLORS[tok.type] || TOKEN_COLORS.plain }}>
-          {tok.text}
-        </span>
-      ))}
+    <pre style={{ ...preStyle, padding: 0 }}>
+      {diffLines.map((entry, idx) => {
+        const isChanged = entry.type === 'changed';
+        const bg = DIFF_BG[entry.type] || 'transparent';
+        const borderColor = DIFF_BORDER[entry.type];
+        const prefix = DIFF_PREFIX[entry.type] || ' ';
+
+        if (isChanged) {
+          // Show old line (red) then new line (green)
+          const oldTokens = highlightCode(entry.oldLine, language);
+          const newTokens = highlightCode(entry.line, language);
+          return (
+            <React.Fragment key={idx}>
+              <span style={{
+                display: 'block',
+                background: DIFF_BG.removed,
+                borderLeft: `3px solid ${DIFF_BORDER.removed}`,
+                paddingLeft: '0.5rem',
+                paddingRight: '0.75rem',
+                minHeight: '1.2em',
+              }}>
+                <span style={{ color: '#dc3545', userSelect: 'none', marginRight: '0.4rem', opacity: 0.7 }}>-</span>
+                {oldTokens.map((tok, ti) => (
+                  <span key={ti} style={{ color: TOKEN_COLORS[tok.type] || TOKEN_COLORS.plain }}>{tok.text}</span>
+                ))}
+              </span>
+              <span style={{
+                display: 'block',
+                background: DIFF_BG.added,
+                borderLeft: `3px solid ${DIFF_BORDER.added}`,
+                paddingLeft: '0.5rem',
+                paddingRight: '0.75rem',
+                minHeight: '1.2em',
+              }}>
+                <span style={{ color: '#28a745', userSelect: 'none', marginRight: '0.4rem', opacity: 0.7 }}>+</span>
+                {newTokens.map((tok, ti) => (
+                  <span key={ti} style={{ color: TOKEN_COLORS[tok.type] || TOKEN_COLORS.plain }}>{tok.text}</span>
+                ))}
+              </span>
+            </React.Fragment>
+          );
+        }
+
+        const lineTokens = highlightCode(entry.line, language);
+        return (
+          <span key={idx} style={{
+            display: 'block',
+            background: bg,
+            borderLeft: borderColor ? `3px solid ${borderColor}` : '3px solid transparent',
+            paddingLeft: '0.5rem',
+            paddingRight: '0.75rem',
+            minHeight: '1.2em',
+          }}>
+            {entry.type !== 'unchanged' && (
+              <span style={{
+                color: borderColor,
+                userSelect: 'none',
+                marginRight: '0.4rem',
+                opacity: 0.8,
+                fontWeight: 'bold',
+              }}>{prefix}</span>
+            )}
+            {lineTokens.map((tok, ti) => (
+              <span key={ti} style={{ color: TOKEN_COLORS[tok.type] || TOKEN_COLORS.plain }}>{tok.text}</span>
+            ))}
+          </span>
+        );
+      })}
     </pre>
   );
 };
@@ -163,7 +367,9 @@ const PropertiesPanel = ({
   generatedCode,
   generatedFiles = [],
   selectedFileIndex = 0,
-  setSelectedFileIndex = () => {}
+  setSelectedFileIndex = () => {},
+  panelWidth = 384,
+  setPanelWidth = () => {},
 }) => {
   /**
    * currentCode / useEffect sync
@@ -175,15 +381,74 @@ const PropertiesPanel = ({
    *   selectedFileIndex, generatedFiles, or generatedCode changes, ensuring
    *   the displayed code always reflects the current selection.
    */
-  const [currentCode, setCurrentCode] = useState(generatedCode);
+  // ── Panel drag-resize ─────────────────────────────────────
+  // Lets the user drag the left edge of the panel to make it wider/narrower.
+  const isDraggingRef = useRef(false);
+  const dragStartXRef = useRef(0);
+  const dragStartWidthRef = useRef(panelWidth);
 
-  // Update displayed code when file index changes or generatedFiles changes
+  const handleResizeMouseDown = useCallback((e) => {
+    e.preventDefault();
+    isDraggingRef.current = true;
+    dragStartXRef.current = e.clientX;
+    dragStartWidthRef.current = panelWidth;
+
+    const onMouseMove = (me) => {
+      if (!isDraggingRef.current) return;
+      // Dragging left increases the panel (panel is on the right side)
+      const delta = dragStartXRef.current - me.clientX;
+      const next = Math.min(700, Math.max(280, dragStartWidthRef.current + delta));
+      setPanelWidth(next);
+    };
+
+    const onMouseUp = () => {
+      isDraggingRef.current = false;
+      window.removeEventListener('mousemove', onMouseMove);
+      window.removeEventListener('mouseup', onMouseUp);
+    };
+
+    window.addEventListener('mousemove', onMouseMove);
+    window.addEventListener('mouseup', onMouseUp);
+  }, [panelWidth, setPanelWidth]);
+
+  const [currentCode, setCurrentCode] = useState(generatedCode);
+  // showDiff: whether to show the diff view (toggled by the user)
+  const [showDiff, setShowDiff] = useState(false);
+  // prevFilesRef: remembers the previously-generated files so we can diff
+  // prevCode: the previous version of the currently-shown file
+  const [prevCode, setPrevCode] = useState('');
+
+  // Single ref that always holds the LAST generation's files.
+  // Reading it before updating gives us the "previous" snapshot for diffing.
+  const prevGeneratedFilesRef = useRef([]);
+
+  // One unified effect: derive both currentCode and prevCode, then advance
+  // the snapshot. Keeping everything in one effect avoids the ordering race
+  // that broke the diff button (two separate effects on the same dependency
+  // have no guaranteed execution order relative to each other).
   useEffect(() => {
+    let next = '';
+    let prev = '';
+
     if (generatedFiles.length > 0 && selectedFileIndex < generatedFiles.length) {
-      setCurrentCode(generatedFiles[selectedFileIndex].content);
+      next = generatedFiles[selectedFileIndex].content;
+      const prevFile = prevGeneratedFilesRef.current.find(
+        f => f.filename === generatedFiles[selectedFileIndex].filename
+      );
+      prev = prevFile ? prevFile.content : '';
     } else if (generatedCode) {
-      setCurrentCode(generatedCode);
+      next = generatedCode;
+      prev = prevGeneratedFilesRef.current[0]?.content || '';
     }
+
+    // Advance snapshot AFTER reading from it
+    if (generatedFiles.length > 0) {
+      prevGeneratedFilesRef.current = generatedFiles;
+    }
+
+    setCurrentCode(next);
+    setPrevCode(prev);
+    setShowDiff(false); // reset diff view on every new generation
   }, [selectedFileIndex, generatedFiles, generatedCode]);
 
   /**
@@ -262,7 +527,28 @@ const PropertiesPanel = ({
   };
 
   return (
-    <div className="w-96 flex-shrink-0 bg-[#252526] border-l border-[#3e3e42] flex flex-col">
+    <div
+      className="flex-shrink-0 bg-[#252526] border-l border-[#3e3e42] flex flex-col relative"
+      style={{ width: panelWidth }}
+    >
+      {/* Drag handle — left edge, grab to resize */}
+      <div
+        onMouseDown={handleResizeMouseDown}
+        title="Drag to resize panel"
+        style={{
+          position: 'absolute',
+          left: 0,
+          top: 0,
+          bottom: 0,
+          width: '5px',
+          cursor: 'col-resize',
+          zIndex: 10,
+          background: 'transparent',
+          transition: 'background 150ms',
+        }}
+        onMouseEnter={e => { e.currentTarget.style.background = 'rgba(0,122,204,0.4)'; }}
+        onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; }}
+      />
       {/* Tabs */}
       <div className="flex border-b border-[#3e3e42]">
         <button
@@ -331,21 +617,56 @@ const PropertiesPanel = ({
           <div className="h-full flex flex-col p-4">
             <div className="flex justify-between items-center mb-3">
               <h3 className="text-sm font-semibold text-gray-400">GENERATED CODE</h3>
-              {currentCode && (
-                <button
-                  onClick={() => {
-                    navigator.clipboard.writeText(currentCode).then(() => {
-                      onCopySuccess?.('Code copied to clipboard!');
-                    }).catch(() => {
-                      onCopySuccess?.('Failed to copy — please copy manually.', 'error');
-                    });
-                  }}
-                  className="text-xs text-[#007acc] hover:text-[#005a9e] transition-colors"
-                >
-                  Copy Code
-                </button>
-              )}
+              <div className="flex items-center gap-2">
+                {/* Diff toggle — only shown when there's a previous version to compare */}
+                {prevCode && prevCode !== currentCode && (
+                  <button
+                    onClick={() => setShowDiff(v => !v)}
+                    title={showDiff ? 'Hide changes' : 'Show what changed'}
+                    className={`flex items-center gap-1 text-xs px-2 py-1 rounded transition-colors ${
+                      showDiff
+                        ? 'bg-[#007acc] text-white'
+                        : 'text-gray-400 hover:text-white bg-[#3e3e42] hover:bg-[#4a4a4f]'
+                    }`}
+                  >
+                    <GitCompare size={12} />
+                    {showDiff ? 'Diff On' : 'Show Diff'}
+                  </button>
+                )}
+                {currentCode && (
+                  <button
+                    onClick={() => {
+                      navigator.clipboard.writeText(currentCode).then(() => {
+                        onCopySuccess?.('Code copied to clipboard!');
+                      }).catch(() => {
+                        onCopySuccess?.('Failed to copy — please copy manually.', 'error');
+                      });
+                    }}
+                    className="text-xs text-[#007acc] hover:text-[#005a9e] transition-colors"
+                  >
+                    Copy Code
+                  </button>
+                )}
+              </div>
             </div>
+
+            {/* Diff legend + stats — shown only in diff mode */}
+            {showDiff && prevCode && prevCode !== currentCode && (() => {
+              const dl = computeDiff(prevCode, currentCode);
+              const { added, removed, changed } = diffStats(dl);
+              return (
+                <div className="mb-2 flex items-center gap-3 text-xs px-2 py-1.5 rounded bg-[#1e1e1e] border border-[#3e3e42]">
+                  <span className="text-gray-400 font-medium">Changes:</span>
+                  {added > 0 && <span style={{ color: '#28a745' }}>+{added} added</span>}
+                  {removed > 0 && <span style={{ color: '#dc3545' }}>−{removed} removed</span>}
+                  {changed > 0 && <span style={{ color: '#ffc107' }}>~{changed} modified</span>}
+                  <span className="ml-auto flex gap-3">
+                    <span style={{ color: '#28a745' }}>■ Added</span>
+                    <span style={{ color: '#dc3545' }}>■ Removed</span>
+                  </span>
+                </div>
+              );
+            })()}
 
             {/* File Tabs - Show when multiple files are generated */}
             {generatedFiles.length > 1 && (
@@ -367,7 +688,12 @@ const PropertiesPanel = ({
             )}
 
             {currentCode ? (
-              <SyntaxHighlightedCode code={currentCode} language={language || 'Java'} />
+              <SyntaxHighlightedCode
+                code={currentCode}
+                prevCode={showDiff ? prevCode : ''}
+                language={language || 'Java'}
+                showDiff={showDiff}
+              />
             ) : (
               <div className="flex-1 flex items-center justify-center">
                 <p className="text-sm text-gray-500 text-center">

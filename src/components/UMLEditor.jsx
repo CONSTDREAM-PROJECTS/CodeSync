@@ -125,6 +125,11 @@ const UMLEditor = ({ currentUser, onLoginSuccess, onLogout }) => {
   const [selectedFileIndex, setSelectedFileIndex] = useState(0);
   const [showCodePanel, setShowCodePanel] = useState(false);
 
+  // ── Properties panel width state ───────────────────────────
+  // panelWidth: user-draggable width for the right Properties/Code panel.
+  // Min 280 px (readable), max 700 px (still leaves room for the canvas).
+  const [panelWidth, setPanelWidth] = useState(384); // default = w-96
+
   // ── Clipboard state ────────────────────────────────────────
   // clipboard: deep-clone of the last copied element(s). Supports Ctrl+V paste.
   const [clipboard, setClipboard] = useState(null);
@@ -2169,6 +2174,8 @@ const UMLEditor = ({ currentUser, onLoginSuccess, onLogout }) => {
         generatedFiles={generatedFiles}
         selectedFileIndex={selectedFileIndex}
         setSelectedFileIndex={setSelectedFileIndex}
+        panelWidth={panelWidth}
+        setPanelWidth={setPanelWidth}
       />
 
       {/* Validation Panel — inline error display */}

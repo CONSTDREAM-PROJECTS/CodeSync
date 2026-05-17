@@ -119,6 +119,7 @@ const PortalTooltip = ({ text, x, y }) => {
 const TooltipButton = ({ item, isActive, onClick }) => {
   const [tip, setTip] = useState(null);
   const [isHovering, setIsHovering] = useState(false);
+  const timerRef = React.useRef(null);
   const desc = TOOL_DESCRIPTIONS[item.id] || null;
 
   const handleMouseEnter = (e) => {
@@ -126,7 +127,7 @@ const TooltipButton = ({ item, isActive, onClick }) => {
     setIsHovering(true);
     // Capture rect immediately — e.currentTarget becomes null inside setTimeout
     const rect = e.currentTarget.getBoundingClientRect();
-    setTimeout(() => {
+    timerRef.current = setTimeout(() => {
       setTip({
         x: rect.left + rect.width / 2,
         y: rect.top,
@@ -135,6 +136,9 @@ const TooltipButton = ({ item, isActive, onClick }) => {
   };
 
   const handleMouseLeave = () => {
+    // Cancel the pending timer so the tooltip never appears if the mouse
+    // leaves before the 80 ms delay has elapsed.
+    clearTimeout(timerRef.current);
     setIsHovering(false);
     setTip(null);
   };
