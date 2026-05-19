@@ -635,7 +635,7 @@ export default function DocumentationModal({ onClose }) {
           <div className="flex items-center gap-3">
             <BookOpen size={20} className="text-[#007acc]" />
             <div>
-              <h2 className="text-lg font-bold text-white">Documentation</h2>
+              <h2 className="text-lg font-bold text-white">User Manual</h2>
               <p className="text-xs text-gray-400 mt-0.5">How the diagrams work and how to use Code to Diagram</p>
             </div>
           </div>
