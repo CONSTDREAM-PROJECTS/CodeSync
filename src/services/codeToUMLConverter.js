@@ -276,32 +276,37 @@ class CodeToUMLConverter {
    */
   static extractJavaAttributes(classBody) {
     const attributes = [];
-    /**
-     * attrRegex — matches "private static final List<Book> books = ..."
-     * Optional groups: visibility, static, final; required: type (with optional
-     * generic params like <Book>), name. Semicolon required to avoid matching
-     * method parameters that look identical without it.
-     */
+    // Strip method bodies first so "return null;" "throw new X();" etc. inside
+    // methods are never mistaken for field declarations.
+    // Replace everything between { } with spaces, preserving line count.
+    const bodyStripped = classBody.replace(/\{[^{}]*\}/g, match =>
+      ' '.repeat(match.length)
+    );
+
     const attrRegex = /(public|private|protected)?\s+(static\s+)?(final\s+)?(\w+(?:<[^>]+>)?)\s+(\w+)(?:\s*=\s*[^;]+)?;/g;
-
     let match;
-    const seen = new Set(); // Prevents duplicate field entries
+    const seen = new Set();
+    // Keywords that are never valid field names or types
+    const RESERVED = new Set(['return','throw','new','if','else','while','for','switch','case','break','continue','super','this','true','false','null','void','instanceof']);
 
-    while ((match = attrRegex.exec(classBody)) !== null) {
+    while ((match = attrRegex.exec(bodyStripped)) !== null) {
       const [, visibility = 'private', isStatic, isFinal, type, name] = match;
+      // Skip if name or type is a Java keyword — means we matched a statement, not a field
+      if (RESERVED.has(name) || RESERVED.has(type)) continue;
+      // Skip if type is a visibility keyword — means the regex misparsed a method signature
+      if (['public','private','protected'].includes(type)) continue;
       if (!seen.has(name)) {
         seen.add(name);
         attributes.push({
           name,
-          rawType: type,                      // FIX: full string e.g. "List<Book>" — used by relationship detector
-          type: type.replace(/<[^>]+>/, ''), // Stripped e.g. "List" — used for diagram display label only
+          rawType: type,
+          type: type.replace(/<[^>]+>/, ''),
           visibility: visibility || 'private',
           isStatic: !!isStatic,
           isFinal: !!isFinal
         });
       }
     }
-
     return attributes;
   }
 
@@ -320,17 +325,24 @@ class CodeToUMLConverter {
    */
   static extractJavaMethods(classBody) {
     const methods = [];
-    /**
-     * methodRegex — matches "public static abstract ReturnType methodName(params) throws X {"
-     * The (?:\{|;) at the end matches both concrete and abstract method endings.
-     */
     const methodRegex = /(public|private|protected)?\s+(static\s+)?(abstract\s+)?(\w+(?:<[^>]+>)?)\s+(\w+)\s*\(([^)]*)\)(?:\s+throws\s+[\w\s,]+)?\s*(?:\{|;)/g;
 
     let match;
     const seen = new Set();
+    const VISIBILITY = new Set(['public','private','protected']);
 
     while ((match = methodRegex.exec(classBody)) !== null) {
       const [, visibility = 'public', isStatic, isAbstract, returnType, methodName, params] = match;
+
+      // BUG FIX: If returnType is a visibility keyword (public/private/protected),
+      // the regex misparsed a declaration like "public public Dog(...)" — this happens
+      // when generated code is round-tripped and the method signature has an extra
+      // access modifier. Skip these false positives entirely.
+      if (VISIBILITY.has(returnType)) continue;
+
+      // Skip Java keywords that are never valid method names
+      if (['if','else','while','for','switch','new','return','class'].includes(methodName)) continue;
+
       if (!seen.has(methodName)) {
         seen.add(methodName);
         methods.push({
@@ -827,10 +839,25 @@ class CodeToUMLConverter {
         return; // Skip code-based rules for non-class elements
       }
 
-      // 1. INHERITANCE
+      // 1. INHERITANCE — preserve even when parent class is in a different file
       if (sourceClass.extends) {
-        const targetClass = classes.find(c => c.name === sourceClass.extends);
-        if (targetClass) relationships.push({
+        let targetClass = classes.find(c => c.name === sourceClass.extends);
+        if (!targetClass) {
+          // Parent class is in a different file — create a lightweight placeholder
+          // so the inheritance arrow is still drawn. The placeholder gets an 'external'
+          // stereotype so the diagram can style it differently if desired.
+          targetClass = {
+            id:         `ext_${sourceClass.extends}_${Date.now()}`,
+            name:       sourceClass.extends,
+            extends:    null, implements: [],
+            attributes: [], methods: [],
+            isAbstract: false,
+            isExternal: true,   // flag: this class came from another file
+            elementType: 'class'
+          };
+          classes.push(targetClass);
+        }
+        relationships.push({
           sourceId: sourceClass.id, targetId: targetClass.id,
           type: 'inheritance', label: 'extends'
         });
@@ -1048,7 +1075,6 @@ class CodeToUMLConverter {
         ? cls.elementType
         : (cls.isAbstract ? 'abstract' : 'class');
 
-      // Actors and lifelines need taller boxes to fit the stickman drawing
       const defaultWidth  = resolvedType === 'actor'    ? 100
                           : resolvedType === 'lifeline' ? 150
                           : resolvedType === 'usecase'  ? 180
@@ -1068,7 +1094,9 @@ class CodeToUMLConverter {
         height: defaultHeight,
         attributes: cls.attributes || [],
         methods: cls.methods || [],
-        stereotype: cls.isAbstract ? 'abstract' : ''
+        stereotype: cls.isAbstract ? 'abstract' : (cls.isExternal ? 'external' : ''),
+        // isExternal: parent class lives in another file — shown with a note
+        isExternal: cls.isExternal || false
       };
     });
 
@@ -1318,6 +1346,289 @@ class CodeToUMLConverter {
       }
     }
     return { lifelines, messages };
+  }
+
+  /**
+   * convertCodeToUMLUseCase(sourceCode, language)
+   * -----------------------------------------------
+   * LAYMAN'S: Reads the handler-style code that CodeGenerator emits for
+   *   use-case diagrams and reverse-engineers it back into actors, use-case
+   *   ovals, and the connections between them.
+   *
+   * TECHNICAL: Parses the actor-class-per-actor output format produced by
+   *   generateUseCaseHandler(). Key signals extracted:
+   *     • Class names      → actor names  (one class per actor)
+   *     • execute*() methods inside a class → use cases owned by that actor
+   *     • "// <<include>>"  comment lines  → include connections
+   *     • "// <<extend>>"   comment lines  → extend connections
+   *     • "handler.execute*()" calls       → shared use case nodes
+   *   A UseCaseHandler or shared class is recognised by the absence of a
+   *   matching actor pattern and its methods become free-standing use cases.
+   *
+   *   Python format: class names stay the same; method names are
+   *   execute_snake_case() — converted back to Title Case for display.
+   *   JavaScript: identical structure to Java.
+   *
+   * @param {string} sourceCode - Handler code produced by generateUseCaseHandler()
+   * @param {string} language   - 'Java' | 'Python' | 'JavaScript'
+   * @returns {{ success, elements, connections, replaceAll }}
+   */
+  static convertCodeToUMLUseCase(sourceCode, language = 'Java', existingElements = []) {
+    try {
+      const elements    = [];
+      const connections = [];
+      let idCounter     = Date.now();
+      const uid         = () => `uc_${idCounter++}`;
+
+      // ── name-matching helpers ────────────────────────────────
+      // Normalise a display name for fuzzy matching (lowercase, no spaces/punctuation)
+      const norm = (s) => (s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+
+      // Try to find an existing element by type + normalised name so we reuse
+      // its id and position instead of generating new ones (keeps layout stable).
+      const findExisting = (type, name) =>
+        existingElements.find(e => e.type === type && norm(e.name) === norm(name));
+
+      // ── display-name converters ──────────────────────────────
+      const fromMethodName = (raw) => {
+        let s = raw.replace(/^execute_?/i, '');
+        if (!s) return raw;
+        if (s.includes('_')) {
+          return s.split('_').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+        }
+        return s.replace(/([A-Z])/g, ' $1').trim().replace(/\s+/g, ' ')
+                .replace(/^\w/, c => c.toUpperCase());
+      };
+
+      const fromClassName = (name) =>
+        name.replace(/([A-Z])/g, ' $1').trim().replace(/\s+/g, ' ');
+
+      // ── split source into per-class blocks ───────────────────
+      const classBlocks = [];
+
+      if (language === 'Python') {
+        const lines = sourceCode.split('\n');
+        let current = null;
+        for (const line of lines) {
+          const cm = line.match(/^class\s+(\w+)/);
+          if (cm) {
+            if (current) classBlocks.push(current);
+            current = { name: cm[1], body: line + '\n' };
+          } else if (current) {
+            current.body += line + '\n';
+          }
+        }
+        if (current) classBlocks.push(current);
+      } else {
+        const classRegex = /(?:public\s+)?class\s+(\w+)[^{]*\{/g;
+        let m;
+        while ((m = classRegex.exec(sourceCode)) !== null) {
+          const name  = m[1];
+          const start = m.index + m[0].length - 1;
+          let depth = 0, end = start;
+          for (let i = start; i < sourceCode.length; i++) {
+            if (sourceCode[i] === '{') depth++;
+            else if (sourceCode[i] === '}') { depth--; if (depth === 0) { end = i; break; } }
+          }
+          classBlocks.push({ name, body: sourceCode.slice(start + 1, end) });
+        }
+      }
+
+      if (classBlocks.length === 0) {
+        return { success: false, message: 'No classes found in use case code.', elements: [], connections: [] };
+      }
+
+      const HANDLER_RE = /UseCaseHandler|SharedHandler|UseCaseRunner/i;
+
+      const getMethodsFromBody = (body, lang) => {
+        const methods = [];
+        if (lang === 'Python') {
+          const re = /def\s+(execute_\w+)\s*\(self\)/g;
+          let m;
+          while ((m = re.exec(body)) !== null) methods.push(m[1]);
+        } else {
+          // IMPORTANT: the prefix (return type or async keyword) is REQUIRED —
+          // not optional — so we only match actual method *declarations* like
+          //   "public boolean executeSearchDocsFullText() {"
+          // and never match *calls* inside a method body like
+          //   "handler.executeDownloadDocs(); // <<include>>"
+          // Making the prefix optional was the root cause of Name actor getting
+          // spurious direct associations to shared use cases (Download docs,
+          // Preview doc) that should only be <<include>> targets.
+          const re = /(?:public\s+\w+\s+|async\s+)(execute\w+)\s*\(/g;
+          let m;
+          while ((m = re.exec(body)) !== null) {
+            if (!methods.includes(m[1])) methods.push(m[1]);
+          }
+        }
+        return methods;
+      };
+
+      const getRelCalls = (methodBody, lang) => {
+        const includes = [], extends_ = [];
+        if (lang === 'Python') {
+          const incRe = /(?:self|handler)\.execute_(\w+)\(\).*#\s*<<include>>/g;
+          const extRe = /#\s*(?:self|handler)\.execute_(\w+)\(\).*#\s*<<extend>>/g;
+          let m;
+          while ((m = incRe.exec(methodBody)) !== null) includes.push(m[1]);
+          while ((m = extRe.exec(methodBody)) !== null) extends_.push(m[1]);
+        } else {
+          const incRe = /(?:handler|this)\.execute(\w+)\(\);\s*\/\/\s*<<include>>/g;
+          const extRe = /\/\/\s*(?:handler|this)\.execute(\w+)\(\);\s*\/\/\s*<<extend>>/g;
+          let m;
+          while ((m = incRe.exec(methodBody)) !== null) includes.push(m[1]);
+          while ((m = extRe.exec(methodBody)) !== null) extends_.push(m[1]);
+        }
+        return { includes, extends_ };
+      };
+
+      // ── lazy use-case registry — reuses existing nodes by name ──
+      const ucByMethodSuffix = new Map();
+      const getOrCreateUC = (suffix) => {
+        if (ucByMethodSuffix.has(suffix)) return ucByMethodSuffix.get(suffix);
+        const name = fromMethodName(
+          language === 'Python' ? 'execute_' + suffix : 'execute' + suffix
+        );
+        // Try to reuse an existing usecase element with the same name
+        const existing = findExisting('usecase', name);
+        const ucCount  = elements.filter(e => e.type === 'usecase').length;
+        const el = existing
+          ? { ...existing }  // keep id, x, y, width, height from canvas
+          : {
+              id:          uid(),
+              type:        'usecase',
+              diagramType: 'usecase',
+              name,
+              x:      300 + (ucCount % 4) * 220,
+              y:      200 + Math.floor(ucCount / 4) * 130,
+              width:  160,
+              height: 60,
+              properties: {},
+            };
+        elements.push(el);
+        ucByMethodSuffix.set(suffix, el.id);
+        return el.id;
+      };
+
+      // ── process each class block ──────────────────────────────
+      // Spread actors horizontally; reuse positions when possible
+      const existingActors = existingElements.filter(e => e.type === 'actor');
+      let actorSlot = 0;
+
+      for (const block of classBlocks) {
+        const isHandler = HANDLER_RE.test(block.name);
+        const methods   = getMethodsFromBody(block.body, language);
+
+        if (!isHandler) {
+          const actorName    = fromClassName(block.name);
+          const existingActor = findExisting('actor', actorName);
+          const actor = existingActor
+            ? { ...existingActor }
+            : {
+                id:          uid(),
+                type:        'actor',
+                diagramType: 'usecase',
+                name:        actorName,
+                // space actors evenly across the top if no existing position
+                x:      80 + actorSlot * 200,
+                y:      120,
+                width:  80,
+                height: 100,
+                properties: {},
+              };
+          elements.push(actor);
+          actorSlot++;
+
+          for (const method of methods) {
+            const suffix = language === 'Python'
+              ? method.replace(/^execute_/, '')
+              : method.replace(/^execute/, '');
+            if (!suffix) continue;
+
+            const ucId = getOrCreateUC(suffix);
+
+            // Association: actor → use case
+            connections.push({
+              id:   uid(),
+              type: 'association',
+              from: actor.id,
+              to:   ucId,
+              fromMultiplicity: '', toMultiplicity: '',
+              label: '', fromRole: '', toRole: '',
+            });
+
+            // Extract this method's body to find include/extend calls
+            let methodBody = '';
+            if (language === 'Python') {
+              const mRe = new RegExp(`def\\s+${method}\\s*\\(self\\)[\\s\\S]*?(?=\\n    def |$)`);
+              const mM  = block.body.match(mRe);
+              if (mM) methodBody = mM[0];
+            } else {
+              const mRe = new RegExp(`execute${suffix}\\s*\\([^)]*\\)\\s*\\{([\\s\\S]*?)\\n    \\}`);
+              const mM  = block.body.match(mRe);
+              if (mM) methodBody = mM[1];
+            }
+
+            const { includes, extends_ } = getRelCalls(methodBody, language);
+
+            for (const incSuffix of includes) {
+              const incId = getOrCreateUC(incSuffix);
+              connections.push({
+                id:   uid(),
+                type: 'include',
+                from: ucId,
+                to:   incId,
+                fromMultiplicity: '', toMultiplicity: '',
+                label: '<<include>>', fromRole: '', toRole: '',
+              });
+            }
+            for (const extSuffix of extends_) {
+              const extId = getOrCreateUC(extSuffix);
+              connections.push({
+                id:   uid(),
+                type: 'extend',
+                from: extId,
+                to:   ucId,
+                fromMultiplicity: '', toMultiplicity: '',
+                label: '<<extend>>', fromRole: '', toRole: '',
+              });
+            }
+          }
+        }
+        // Handler classes (UseCaseHandler, UseCaseRunner, SharedHandler) are
+        // intentionally skipped here. Their methods only become use-case nodes
+        // when an actor class explicitly calls handler.executeXxx() with an
+        // <<include>> or <<extend>> comment. Creating nodes unconditionally for
+        // every handler method produced orphan use-case nodes ("Download docs",
+        // "Preview doc", "Add user") and a phantom "Use Case Runner" actor.
+      }
+
+      if (elements.length === 0) {
+        return { success: false, message: 'Could not find any actors or use cases in the code.', elements: [], connections: [] };
+      }
+
+      // ── Deduplicate connections ──────────────────────────────────────────
+      // The converter builds one connection per method per parse. When
+      // applyCodeToDiagram is called repeatedly on the same code (e.g. on
+      // code-side undo/redo, or on a debounce replay) the actor/use-case
+      // nodes are reused by ID via findExisting(), but every call was still
+      // pushing fresh connection objects — resulting in doubled (or tripled)
+      // arrows on the canvas. We deduplicate here by (from, to, type) so the
+      // returned connections array never has more than one edge of each kind
+      // between any two nodes.
+      const seen = new Set();
+      const dedupedConnections = connections.filter(c => {
+        const key = `${c.from}|${c.to}|${c.type}`;
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+
+      return { success: true, elements, connections: dedupedConnections, replaceAll: true };
+
+    } catch (err) {
+      return { success: false, message: err.message || 'Unexpected error parsing use case code.', elements: [], connections: [] };
+    }
   }
 
 }

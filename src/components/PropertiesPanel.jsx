@@ -43,7 +43,8 @@
  */
 
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
-import { Trash2, GitCompare, Eye } from 'lucide-react';
+import { Trash2, GitCompare, Eye, Pencil, RefreshCw } from 'lucide-react';
+import CodeToUMLConverter from '../services/codeToUMLConverter';
 
 /**
  * Fix #18: Lightweight syntax highlighter — no external library needed.
@@ -344,7 +345,7 @@ const SyntaxHighlightedCode = ({ code, prevCode, language, showDiff }) => {
  * @param {Function} setConnections         - Updates the connection list in UMLEditor
  * @param {Function} setSelectedConnection  - Updates the selected connection in UMLEditor
  * @param {Function} saveToHistory          - Commits the current state to undo history
- * @param {string}   generatedCode          - Single-string fallback generated code
+ * @param {string}   selectedDiagram        - Active diagram type: 'class' | 'usecase' | 'sequence'
  * @param {Array}    generatedFiles         - Array of { filename, content } objects
  * @param {number}   selectedFileIndex      - Index of the active file tab
  * @param {Function} setSelectedFileIndex   - Changes the active file tab
@@ -354,6 +355,7 @@ const PropertiesPanel = ({
   showCodePanel,
   setShowCodePanel,
   language,
+  selectedDiagram = 'class',
   selectedElements,
   selectedConnection,
   elements,
@@ -364,6 +366,7 @@ const PropertiesPanel = ({
   setSelectedConnection,
   saveToHistory,
   onCopySuccess,
+  onCodeEdit,
   generatedCode,
   generatedFiles = [],
   selectedFileIndex = 0,
@@ -412,44 +415,275 @@ const PropertiesPanel = ({
   }, [panelWidth, setPanelWidth]);
 
   const [currentCode, setCurrentCode] = useState(generatedCode);
-  // showDiff: whether to show the diff view (toggled by the user)
+  const currentCodeRef = useRef(generatedCode);
+
   const [showDiff, setShowDiff] = useState(false);
-  // prevFilesRef: remembers the previously-generated files so we can diff
-  // prevCode: the previous version of the currently-shown file
-  const [prevCode, setPrevCode] = useState('');
 
-  // Single ref that always holds the LAST generation's files.
-  // Reading it before updating gives us the "previous" snapshot for diffing.
-  const prevGeneratedFilesRef = useRef([]);
+  // prevSnapshot: permanently holds the PREVIOUS generation's files so
+  // switching tabs and re-generating never loses the "before" picture.
+  // Separate from currentFilesRef so the two never alias each other.
+  const prevSnapshotRef  = useRef([]); // files from generation N-1
+  const currentFilesRef  = useRef([]); // files from generation N (latest)
 
-  // One unified effect: derive both currentCode and prevCode, then advance
-  // the snapshot. Keeping everything in one effect avoids the ordering race
-  // that broke the diff button (two separate effects on the same dependency
-  // have no guaranteed execution order relative to each other).
+  // prevCode for the currently-viewed file tab — derived from prevSnapshotRef
+  const [prevCode, setPrevCode]   = useState('');
+  const prevCodeRef               = useRef('');
+
+  // true once there has been at least one previous generation to diff against.
+  // Must be STATE (not just a ref) so the Show Diff button re-renders and appears.
+  const [hasPrevGeneration, setHasPrevGeneration] = useState(false);
+  const hasPrevGenerationRef = useRef(false); // ref mirror for use inside effects
+
+  // ── Inline code editing ───────────────────────────────────
+  const [editBuffer, setEditBuffer] = useState('');
+  const [syncStatus, setSyncStatus] = useState(null);
+  const [syncError,  setSyncError]  = useState('');
+
+  // ── Code-side undo/redo stack ─────────────────────────────
+  // Maintained independently from the diagram's useHistory so that
+  // Ctrl+Z inside the code textarea rolls back code text AND re-parses
+  // to restore the diagram to the matching state.
+  // Each entry is a plain code string snapshot.
+  const codeHistoryRef      = useRef(['']);   // stack of code strings
+  const codeHistoryIndexRef = useRef(0);      // pointer into the stack
+  // Debounce timer ref — cleared/reset on every keystroke so a snapshot
+  // is only pushed (and diagram only parsed) after 700ms of inactivity.
+  const applyDebounceRef    = useRef(null);
+
+  // Refs for scroll-sync between textarea and highlight layer
+  const textareaRef  = useRef(null);
+  const highlightRef = useRef(null);
+
+  // Live ref so applyCodeToDiagram always reads the current canvas elements
+  // without capturing a stale closure — critical for use-case position reuse.
+  const elementsRef = useRef(elements);
+  useEffect(() => { elementsRef.current = elements; }, [elements]);
+
+  // ── Helper: resolve prevCode for a given file tab index ──
+  // Looks up the matching file from prevSnapshotRef by filename,
+  // falling back to position-based lookup if the filename changed.
+  const getPrevCodeForTab = (tabIndex, newFiles) => {
+    if (prevSnapshotRef.current.length === 0) return '';
+    const targetFilename = newFiles?.[tabIndex]?.filename;
+    if (targetFilename) {
+      const match = prevSnapshotRef.current.find(f => f.filename === targetFilename);
+      if (match) return match.content;
+    }
+    // Fallback: same position
+    return prevSnapshotRef.current[tabIndex]?.content || '';
+  };
+
   useEffect(() => {
-    let next = '';
-    let prev = '';
+    if (!generatedFiles || generatedFiles.length === 0) return;
 
-    if (generatedFiles.length > 0 && selectedFileIndex < generatedFiles.length) {
-      next = generatedFiles[selectedFileIndex].content;
-      const prevFile = prevGeneratedFilesRef.current.find(
-        f => f.filename === generatedFiles[selectedFileIndex].filename
-      );
-      prev = prevFile ? prevFile.content : '';
-    } else if (generatedCode) {
-      next = generatedCode;
-      prev = prevGeneratedFilesRef.current[0]?.content || '';
+    const isNewGeneration = generatedFiles !== currentFilesRef.current;
+
+    if (isNewGeneration) {
+      // ── New generation arrived ────────────────────────────
+      // 1. If there was a previous generation, archive it as the snapshot.
+      if (currentFilesRef.current.length > 0) {
+        prevSnapshotRef.current = currentFilesRef.current;
+        hasPrevGenerationRef.current = true;
+        setHasPrevGeneration(true);
+      }
+      // 2. Advance the current pointer.
+      currentFilesRef.current = generatedFiles;
+
+      // 3. Compute prev/next for the currently-selected tab.
+      const next = generatedFiles[selectedFileIndex]?.content || '';
+      const prev = getPrevCodeForTab(selectedFileIndex, generatedFiles);
+
+      prevCodeRef.current    = prev;
+      currentCodeRef.current = next;
+      setPrevCode(prev);
+      setCurrentCode(next);
+      setEditBuffer(next);
+      // Seed a fresh code-history baseline so Ctrl+Z in the code panel
+      // never undoes past the point where this code was generated.
+      codeHistoryRef.current      = [next];
+      codeHistoryIndexRef.current = 0;
+      setSyncStatus(null);
+      setSyncError('');
+      // Do NOT reset showDiff — if it was on, keep it on so the user
+      // immediately sees the new diff without having to click again.
+
+    } else {
+      // ── User switched file tabs (same generation) ─────────
+      // currentFilesRef and prevSnapshotRef are unchanged;
+      // just re-derive prev/next for the new tab index.
+      const next = generatedFiles[selectedFileIndex]?.content || '';
+      const prev = getPrevCodeForTab(selectedFileIndex, generatedFiles);
+
+      prevCodeRef.current    = prev;
+      currentCodeRef.current = next;
+      setPrevCode(prev);
+      setCurrentCode(next);
+      setEditBuffer(next);
+      // Reset code history for the newly active tab too.
+      codeHistoryRef.current      = [next];
+      codeHistoryIndexRef.current = 0;
+      setSyncStatus(null);
+      setSyncError('');
+      // showDiff stays exactly as it was — switching tabs never toggles it.
     }
-
-    // Advance snapshot AFTER reading from it
-    if (generatedFiles.length > 0) {
-      prevGeneratedFilesRef.current = generatedFiles;
-    }
-
-    setCurrentCode(next);
-    setPrevCode(prev);
-    setShowDiff(false); // reset diff view on every new generation
   }, [selectedFileIndex, generatedFiles, generatedCode]);
+
+  /**
+   * pushCodeHistory(code)
+   * Saves a code string onto the code-side undo stack.
+   * Any "future" entries (from prior undos) are discarded — same
+   * semantics as the diagram useHistory hook.
+   * Capped at 100 entries to avoid unbounded memory growth.
+   * Declared before applyCodeToDiagram and handleCodeChange so those
+   * useCallbacks can safely reference it without a TDZ error.
+   */
+  const pushCodeHistory = useCallback((code) => {
+    const trimmed = codeHistoryRef.current.slice(0, codeHistoryIndexRef.current + 1);
+    const next = [...trimmed, code];
+    codeHistoryRef.current = next.length > 100 ? next.slice(next.length - 100) : next;
+    codeHistoryIndexRef.current = codeHistoryRef.current.length - 1;
+  }, []);
+
+  /**
+   * applyCodeToDiagram(code, onSuccess, options)
+   * Parses the code and pushes the result to UMLEditor.
+   * Called automatically by the debounced live-sync and by the code-side
+   * undo/redo handler. UMLEditor saves the current diagram to history
+   * BEFORE applying, so Ctrl+Z on the canvas restores the pre-edit state.
+   *
+   * FIX (undo-stack desync): When called from the code-side undo/redo handler
+   * (options.fromCodeUndo = true), we forward that flag to onCodeEdit so
+   * UMLEditor knows to skip saveToHistory entirely. This prevents the diagram
+   * undo stack from accumulating spurious entries every time the user presses
+   * Ctrl+Z inside the code textarea, which previously caused connections to
+   * reappear in the wrong place after an undo-then-redo cycle.
+   */
+  const applyCodeToDiagram = useCallback((code, onSuccess, options = {}) => {
+    if (!code.trim()) return;
+    setSyncStatus('applying');
+    setSyncError('');
+    setTimeout(() => {
+      try {
+        let result;
+        if (selectedDiagram === 'sequence') {
+          result = CodeToUMLConverter.convertCodeToUMLSequence(code, language || 'Java');
+        } else if (selectedDiagram === 'usecase') {
+          // Pass elementsRef.current (always fresh, never stale) so the converter
+          // can reuse existing actor/use-case IDs and canvas positions.
+          // Using a ref instead of the `elements` closure variable prevents the
+          // stale-closure feedback loop that previously caused phantom nodes.
+          result = CodeToUMLConverter.convertCodeToUMLUseCase(code, language || 'Java', elementsRef.current);
+        } else {
+          result = CodeToUMLConverter.convertCodeToUML(code, language || 'Java');
+        }
+
+        if (!result.success) {
+          setSyncStatus('error');
+          setSyncError(result.message || 'Could not parse the edited code.');
+          return;
+        }
+
+        onCodeEdit?.(result.elements, result.connections, {
+          replaceAll: result.replaceAll,
+          diagramType: selectedDiagram,
+          // Forward the fromCodeUndo flag so UMLEditor skips diagram saveToHistory
+          // on replays — only fresh live-edits should push a new diagram snapshot.
+          fromCodeUndo: options.fromCodeUndo || false,
+        });
+        setCurrentCode(code);
+        setSyncStatus('success');
+        onSuccess?.();  // push to code history only after successful parse+apply
+        setTimeout(() => setSyncStatus(null), 2000);
+      } catch (err) {
+        setSyncStatus('error');
+        setSyncError(err.message || 'Unexpected error during sync.');
+      }
+    }, 30);
+  }, [language, selectedDiagram, onCodeEdit]);
+
+  /**
+   * handleCodeChange
+   *
+   * For CLASS and USE-CASE diagrams: updates the buffer and schedules a
+   * debounced diagram re-parse 700 ms after the user stops typing.
+   * The converter always does a full replaceAll from the current code text,
+   * so deleting a method removes its connection, adding one creates it.
+   *
+   * For SEQUENCE diagrams only: buffer update only, no live sync, because
+   * sequence code structure doesn't map cleanly to incremental re-parsing.
+   */
+  const handleCodeChange = useCallback((value) => {
+    setEditBuffer(value);
+    setSyncStatus(null);
+    setSyncError('');
+
+    // Sequence diagrams: text-only edit, no live sync (structure too different).
+    // Use-case diagrams: live sync IS enabled — the converter does a full
+    // replaceAll re-parse from the current code, which correctly adds/removes
+    // actors and connections to match exactly what the code says.
+    if (selectedDiagram === 'sequence') return;
+
+    // Cancel any previously scheduled apply
+    clearTimeout(applyDebounceRef.current);
+
+    // Schedule a new apply 700ms from now
+    applyDebounceRef.current = setTimeout(() => {
+      applyCodeToDiagram(value, () => pushCodeHistory(value));
+    }, 700);
+  }, [applyCodeToDiagram, pushCodeHistory, selectedDiagram]);
+
+  /**
+   * handleCodeKeyDown
+   * -----------------
+   * Ctrl+Z  — undo: pop code history, restore text, re-parse diagram.
+   * Ctrl+Y / Ctrl+Shift+Z — redo: same in the forward direction.
+   *
+   * Both are intercepted before the browser's native textarea undo so the
+   * diagram always stays in sync with the code undo stack.
+   * All other keys fall through to normal textarea behaviour.
+   */
+  const handleCodeKeyDown = useCallback((e) => {
+    const isUndo = (e.ctrlKey || e.metaKey) && e.key === 'z' && !e.shiftKey;
+    const isRedo = (e.ctrlKey || e.metaKey) && (e.key === 'y' || (e.key === 'z' && e.shiftKey));
+
+    // Sequence diagrams have no live sync — let browser handle Ctrl+Z natively.
+    if (selectedDiagram === 'sequence') return;
+
+    if (isUndo) {
+      e.preventDefault();
+      clearTimeout(applyDebounceRef.current); // cancel any pending debounce
+      if (codeHistoryIndexRef.current > 0) {
+        codeHistoryIndexRef.current--;
+        const prev = codeHistoryRef.current[codeHistoryIndexRef.current];
+        setEditBuffer(prev);
+        applyCodeToDiagram(prev, undefined, { fromCodeUndo: true });
+      }
+      return;
+    }
+
+    if (isRedo) {
+      e.preventDefault();
+      clearTimeout(applyDebounceRef.current);
+      if (codeHistoryIndexRef.current < codeHistoryRef.current.length - 1) {
+        codeHistoryIndexRef.current++;
+        const next = codeHistoryRef.current[codeHistoryIndexRef.current];
+        setEditBuffer(next);
+        applyCodeToDiagram(next, undefined, { fromCodeUndo: true });
+      }
+      return;
+    }
+  }, [applyCodeToDiagram, selectedDiagram]);
+
+  /**
+   * Scroll-sync: when the textarea scrolls, mirror to the highlight layer
+   * so colored text and the cursor always stay perfectly aligned.
+   */
+  const handleScroll = useCallback(() => {
+    if (highlightRef.current && textareaRef.current) {
+      highlightRef.current.scrollTop  = textareaRef.current.scrollTop;
+      highlightRef.current.scrollLeft = textareaRef.current.scrollLeft;
+    }
+  }, []);
 
   /**
    * updateElement(elementId, updates)
@@ -574,7 +808,7 @@ const PropertiesPanel = ({
       </div>
 
       {/* Content Area */}
-      <div className="flex-1 overflow-y-auto">
+      <div className={`flex-1 ${showCodePanel ? 'overflow-hidden' : 'overflow-y-auto'}`}>
         {!showCodePanel ? (
           // Properties Panel
           <div className="p-4">
@@ -618,8 +852,7 @@ const PropertiesPanel = ({
             <div className="flex justify-between items-center mb-3">
               <h3 className="text-sm font-semibold text-gray-400">GENERATED CODE</h3>
               <div className="flex items-center gap-2">
-                {/* Diff toggle — only shown when there's a previous version to compare */}
-                {prevCode && prevCode !== currentCode && (
+                {hasPrevGeneration && (
                   <button
                     onClick={() => setShowDiff(v => !v)}
                     title={showDiff ? 'Hide changes' : 'Show what changed'}
@@ -636,7 +869,7 @@ const PropertiesPanel = ({
                 {currentCode && (
                   <button
                     onClick={() => {
-                      navigator.clipboard.writeText(currentCode).then(() => {
+                      navigator.clipboard.writeText(editBuffer || currentCode).then(() => {
                         onCopySuccess?.('Code copied to clipboard!');
                       }).catch(() => {
                         onCopySuccess?.('Failed to copy — please copy manually.', 'error');
@@ -650,14 +883,47 @@ const PropertiesPanel = ({
               </div>
             </div>
 
-            {/* Diff legend + stats — shown only in diff mode */}
-            {showDiff && prevCode && prevCode !== currentCode && (() => {
-              const dl = computeDiff(prevCode, currentCode);
+            {/* Sync status indicators */}
+            {syncStatus === 'success' && (
+              <div className="mb-2 flex items-center gap-2 text-xs px-2 py-1.5 rounded bg-[#1e3a1e] border border-[#28a745] text-[#28a745]">
+                <RefreshCw size={11} /> Diagram updated!
+              </div>
+            )}
+            {syncStatus === 'applying' && (
+              <div className="mb-2 flex items-center gap-2 text-xs px-2 py-1.5 rounded bg-[#1e2a3a] border border-[#007acc] text-[#007acc]">
+                <RefreshCw size={11} className="animate-spin" /> Syncing diagram…
+              </div>
+            )}
+            {syncStatus === 'error' && (
+              <div className="mb-2 text-xs px-2 py-1.5 rounded bg-[#3a1e1e] border border-[#dc3545] text-[#dc3545]">
+                <strong>Parse error:</strong> {syncError}
+              </div>
+            )}
+
+            {/* Diff stats bar */}
+            {showDiff && (() => {
+              if (!prevCodeRef.current) {
+                // No previous generation to compare against yet
+                return (
+                  <div className="mb-2 flex items-center gap-2 text-xs px-2 py-1.5 rounded bg-[#1e1e1e] border border-[#3e3e42] text-gray-500">
+                    <GitCompare size={11} /> No previous generation to compare — generate code again after making changes.
+                  </div>
+                );
+              }
+              if (prevCodeRef.current === currentCodeRef.current) {
+                // Code is identical between generations for this file
+                return (
+                  <div className="mb-2 flex items-center gap-2 text-xs px-2 py-1.5 rounded bg-[#1e1e1e] border border-[#3e3e42] text-gray-500">
+                    <GitCompare size={11} /> No changes in this file between generations.
+                  </div>
+                );
+              }
+              const dl = computeDiff(prevCodeRef.current, currentCodeRef.current);
               const { added, removed, changed } = diffStats(dl);
               return (
                 <div className="mb-2 flex items-center gap-3 text-xs px-2 py-1.5 rounded bg-[#1e1e1e] border border-[#3e3e42]">
                   <span className="text-gray-400 font-medium">Changes:</span>
-                  {added > 0 && <span style={{ color: '#28a745' }}>+{added} added</span>}
+                  {added   > 0 && <span style={{ color: '#28a745' }}>+{added} added</span>}
                   {removed > 0 && <span style={{ color: '#dc3545' }}>−{removed} removed</span>}
                   {changed > 0 && <span style={{ color: '#ffc107' }}>~{changed} modified</span>}
                   <span className="ml-auto flex gap-3">
@@ -668,7 +934,7 @@ const PropertiesPanel = ({
               );
             })()}
 
-            {/* File Tabs - Show when multiple files are generated */}
+            {/* File tabs */}
             {generatedFiles.length > 1 && (
               <div className="mb-3 flex gap-2 overflow-x-auto border-b border-[#3e3e42] pb-2">
                 {generatedFiles.map((file, index) => (
@@ -688,18 +954,117 @@ const PropertiesPanel = ({
             )}
 
             {currentCode ? (
-              <SyntaxHighlightedCode
-                code={currentCode}
-                prevCode={showDiff ? prevCode : ''}
-                language={language || 'Java'}
-                showDiff={showDiff}
-              />
+              showDiff ? (
+                /* Diff view — read only */
+                <SyntaxHighlightedCode
+                  code={currentCodeRef.current || currentCode}
+                  prevCode={prevCodeRef.current || prevCode}
+                  language={language || 'Java'}
+                  showDiff={true}
+                />
+              ) : (
+                /*
+                 * Live editor — a single scrollable box that layers:
+                 *   1. A syntax-highlighted <pre> (pointer-events:none, aria-hidden)
+                 *   2. A transparent <textarea> on top that captures all input
+                 * Both share identical font/size/padding so characters align
+                 * pixel-perfectly. The textarea's onScroll mirrors scroll position
+                 * to the <pre> so they never drift apart.
+                 */
+                <div
+                  style={{
+                    flex: 1,
+                    minHeight: 0,
+                    position: 'relative',
+                    borderRadius: '0.25rem',
+                    background: '#1e1e1e',
+                    overflow: 'hidden',
+                  }}
+                >
+                  {/* Syntax highlight layer — visual only, never scrolled by user */}
+                  <pre
+                    ref={highlightRef}
+                    aria-hidden="true"
+                    style={{
+                      position: 'absolute',
+                      inset: 0,
+                      margin: 0,
+                      padding: '0.75rem',
+                      fontSize: '0.75rem',
+                      lineHeight: '1.6',
+                      fontFamily: 'monospace',
+                      tabSize: 2,
+                      whiteSpace: 'pre',
+                      overflowX: 'hidden',
+                      overflowY: 'hidden',   // scroll is driven by textarea
+                      pointerEvents: 'none', // let all clicks fall through to textarea
+                      color: 'transparent',  // text hidden; only colored spans show
+                      wordBreak: 'normal',
+                      zIndex: 1,
+                    }}
+                  >
+                    {/* Render highlighted spans for the live buffer */}
+                    {highlightCode(editBuffer, language || 'Java').map((tok, i) => (
+                      <span key={i} style={{ color: TOKEN_COLORS[tok.type] || TOKEN_COLORS.plain }}>
+                        {tok.text}
+                      </span>
+                    ))}
+                    {/* Trailing newline keeps the pre the same height as the textarea */}
+                    {'\n'}
+                  </pre>
+
+                  {/* Editable textarea — transparent text, visible caret */}
+                  <textarea
+                    ref={textareaRef}
+                    value={editBuffer}
+                    onChange={e => handleCodeChange(e.target.value)}
+                    onKeyDown={handleCodeKeyDown}
+                    onScroll={handleScroll}
+                    spellCheck={false}
+                    autoComplete="off"
+                    autoCorrect="off"
+                    autoCapitalize="off"
+                    style={{
+                      position: 'absolute',
+                      inset: 0,
+                      width: '100%',
+                      height: '100%',
+                      margin: 0,
+                      padding: '0.75rem',
+                      fontSize: '0.75rem',
+                      lineHeight: '1.6',
+                      fontFamily: 'monospace',
+                      tabSize: 2,
+                      whiteSpace: 'pre',
+                      resize: 'none',
+                      background: 'transparent',
+                      color: 'transparent',
+                      caretColor: '#ffffffcc',
+                      border: 'none',
+                      outline: 'none',
+                      overflowX: 'auto',
+                      overflowY: 'auto',
+                      zIndex: 2,
+                    }}
+                  />
+                </div>
+              )
             ) : (
               <div className="flex-1 flex items-center justify-center">
                 <p className="text-sm text-gray-500 text-center">
                   Click "Generate Code" button<br />to see the generated code
                 </p>
               </div>
+            )}
+
+            {/* Hint shown below editor */}
+            {currentCode && !showDiff && (
+              <p className="mt-2 text-xs text-gray-500 flex items-center gap-1">
+                <Pencil size={10} />
+                {selectedDiagram === 'sequence'
+                  ? 'Edit code · click "Code to Diagram" to apply changes to the diagram'
+                  : 'Diagram updates live as you type · Ctrl+Z/Y to undo/redo'}
+              </p>
             )}
           </div>
         )}

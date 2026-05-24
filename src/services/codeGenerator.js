@@ -1011,19 +1011,34 @@ class CodeGenerator {
         .join('');
 
     // ── Step 1: actor → directly-associated use cases ───────
+    // Treats association AND dependency/generalization/realization as
+    // "actor participates in use case" so ANY connecting arrow registers.
     const actorUcIds = new Map(); // actorId → Set<ucId>
     actors.forEach(a => actorUcIds.set(a.id, new Set()));
 
+    const ACTOR_UC_CONN_TYPES = new Set([
+      'association', 'dependency', 'realization', 'generalization',
+      'inheritance', 'link', 'connector'
+    ]);
     connections
-      .filter(c => c.type === 'association')
+      .filter(c => ACTOR_UC_CONN_TYPES.has(c.type))
       .forEach(c => {
         const fromEl = elements.find(e => e.id === c.from);
         const toEl   = elements.find(e => e.id === c.to);
-        // association can be actor→uc or uc→actor
-        if (fromEl?.type === 'actor' && toEl?.type === 'usecase') {
+        if (!fromEl || !toEl) return;
+        // actor → usecase  or  usecase → actor
+        if (fromEl.type === 'actor' && toEl.type === 'usecase') {
           actorUcIds.get(fromEl.id)?.add(toEl.id);
-        } else if (toEl?.type === 'actor' && fromEl?.type === 'usecase') {
+        } else if (toEl.type === 'actor' && fromEl.type === 'usecase') {
           actorUcIds.get(toEl.id)?.add(fromEl.id);
+        }
+        // actor → actor generalization: child actor inherits parent's use cases
+        if (fromEl.type === 'actor' && toEl.type === 'actor') {
+          const parentSet = actorUcIds.get(toEl.id);
+          const childSet  = actorUcIds.get(fromEl.id);
+          if (parentSet && childSet) {
+            parentSet.forEach(id => childSet.add(id));
+          }
         }
       });
 
@@ -1031,7 +1046,9 @@ class CodeGenerator {
     const includeMap = new Map(); // ucId → [target ucId]
     usecases.forEach(uc => includeMap.set(uc.id, []));
     connections
-      .filter(c => c.type === 'include' || c.label?.toLowerCase().includes('include'))
+      .filter(c => c.type === 'include'
+               || c.label?.toLowerCase().includes('include')
+               || c.label?.includes('<<include>>'))
       .forEach(c => {
         if (includeMap.has(c.from)) includeMap.get(c.from).push(c.to);
       });
@@ -1040,11 +1057,24 @@ class CodeGenerator {
     const extendMap = new Map(); // ucId → [extension ucId]
     usecases.forEach(uc => extendMap.set(uc.id, []));
     connections
-      .filter(c => c.type === 'extend' || c.label?.toLowerCase().includes('extend'))
+      .filter(c => c.type === 'extend'
+               || c.label?.toLowerCase().includes('extend')
+               || c.label?.includes('<<extend>>'))
       .forEach(c => {
         // extend arrow points FROM the extension TO the base use case
         // we want: baseUcId → [extensionUcId]
         if (extendMap.has(c.to)) extendMap.get(c.to).push(c.from);
+      });
+
+    // ── Step 3b: generalization map — actor/uc inheritance ──
+    // generalization between usecases: child inherits parent's label in docs
+    const genMap = new Map(); // childId → parentId
+    connections
+      .filter(c => c.type === 'generalization' || c.type === 'inheritance')
+      .forEach(c => {
+        const fromEl = elements.find(e => e.id === c.from);
+        const toEl   = elements.find(e => e.id === c.to);
+        if (fromEl && toEl) genMap.set(c.from, c.to);
       });
 
     // ── Step 4: shared use cases (included/extended only, no direct actor) ──
@@ -1061,12 +1091,19 @@ class CodeGenerator {
       const extensions = (extendMap.get(uc.id) || [])
         .map(id => elements.find(e => e.id === id))
         .filter(Boolean);
+      const parentUcId = genMap.get(uc.id);
+      const parentUc   = parentUcId ? elements.find(e => e.id === parentUcId) : null;
 
       let m = `${indent}/**\n${indent} * Execute use case: ${uc.name}\n`;
+      if (parentUc)          m += `${indent} * Specializes: ${parentUc.name}\n`;
       if (includes.length)   m += `${indent} * Includes: ${includes.map(u => u.name).join(', ')}\n`;
       if (extensions.length) m += `${indent} * Extended by: ${extensions.map(u => u.name).join(', ')}\n`;
       m += `${indent} */\n`;
       m += `${indent}public boolean execute${mC}() {\n`;
+      if (parentUc) {
+        m += `${indent}    // Calls parent use case first (generalization)\n`;
+        m += `${indent}    execute${toPascalCase(parentUc.name)}();\n`;
+      }
       // wire mandatory includes
       includes.forEach(inc => {
         const shared = sharedUcs.find(s => s.id === inc.id);
@@ -1094,12 +1131,18 @@ class CodeGenerator {
       const extensions = (extendMap.get(uc.id) || [])
         .map(id => elements.find(e => e.id === id))
         .filter(Boolean);
+      const parentUcId = genMap.get(uc.id);
+      const parentUc   = parentUcId ? elements.find(e => e.id === parentUcId) : null;
 
       let m = `${indent}def execute_${ms}(self) -> bool:\n`;
       m += `${indent}    """Execute use case: ${uc.name}`;
+      if (parentUc)          m += ` | specializes: ${parentUc.name}`;
       if (includes.length)   m += ` | includes: ${includes.map(u => u.name).join(', ')}`;
       if (extensions.length) m += ` | extended by: ${extensions.map(u => u.name).join(', ')}`;
       m += `"""\n`;
+      if (parentUc) {
+        m += `${indent}    self.execute_${toSnakeCase(parentUc.name)}()  # generalization\n`;
+      }
       includes.forEach(inc => {
         const shared = sharedUcs.find(s => s.id === inc.id);
         const prefix = shared ? 'self.handler.' : 'self.';
@@ -1124,12 +1167,18 @@ class CodeGenerator {
       const extensions = (extendMap.get(uc.id) || [])
         .map(id => elements.find(e => e.id === id))
         .filter(Boolean);
+      const parentUcId = genMap.get(uc.id);
+      const parentUc   = parentUcId ? elements.find(e => e.id === parentUcId) : null;
 
       let m = `${indent}/** Execute use case: ${uc.name}`;
+      if (parentUc)          m += ` | specializes: ${parentUc.name}`;
       if (includes.length)   m += ` | includes: ${includes.map(u => u.name).join(', ')}`;
       if (extensions.length) m += ` | extended by: ${extensions.map(u => u.name).join(', ')}`;
       m += ` */\n`;
       m += `${indent}execute${mC}() {\n`;
+      if (parentUc) {
+        m += `${indent}    this.execute${toPascalCase(parentUc.name)}(); // generalization\n`;
+      }
       includes.forEach(inc => {
         const shared = sharedUcs.find(s => s.id === inc.id);
         const prefix = shared ? 'this.handler.' : 'this.';
@@ -1300,27 +1349,48 @@ class CodeGenerator {
 
   static generateUseCaseDocumentation(elements, connections) {
     let doc = '# Use Case Diagram Documentation\n\n';
+
+    // ── Actors ──────────────────────────────────────────────
     doc += '## Actors\n\n';
     elements.filter(e => e.type === 'actor').forEach(actor => {
-      // Only show direct associations (solid lines) for actor→use case
+      const PARTICIPATION_TYPES = new Set([
+        'association','dependency','realization','generalization','inheritance','link','connector'
+      ]);
       const directUcNames = connections
-        .filter(c => (c.from === actor.id || c.to === actor.id) && c.type === 'association')
+        .filter(c => PARTICIPATION_TYPES.has(c.type)
+                  && (c.from === actor.id || c.to === actor.id))
         .map(c => {
           const ucId = c.from === actor.id ? c.to : c.from;
-          return elements.find(e => e.id === ucId)?.name || '';
+          return elements.find(e => e.id === ucId && e.type === 'usecase')?.name || '';
         })
         .filter(Boolean);
-      doc += `### ${actor.name}\n- **Use Cases**: ${directUcNames.join(', ') || 'none'}\n\n`;
+
+      // Actor generalizations (inherits-from)
+      const parentActorConn = connections.find(
+        c => (c.type === 'generalization' || c.type === 'inheritance') && c.from === actor.id
+      );
+      const parentActor = parentActorConn
+        ? elements.find(e => e.id === parentActorConn.to && e.type === 'actor')
+        : null;
+
+      doc += `### ${actor.name}\n`;
+      if (parentActor) doc += `- **Specializes**: ${parentActor.name}\n`;
+      doc += `- **Use Cases**: ${directUcNames.join(', ') || 'none'}\n\n`;
     });
 
+    // ── Use Cases ────────────────────────────────────────────
     doc += '## Use Cases\n\n';
     elements.filter(e => e.type === 'usecase').forEach(uc => {
       doc += `### ${uc.name}\n`;
       doc += `- **Description**: ${uc.description || 'No description provided'}\n`;
 
-      // Actors directly associated
+      // Actors directly associated (any participation type)
+      const PARTICIPATION_TYPES = new Set([
+        'association','dependency','realization','generalization','inheritance','link','connector'
+      ]);
       const actorNames = connections
-        .filter(c => (c.from === uc.id || c.to === uc.id) && c.type === 'association')
+        .filter(c => PARTICIPATION_TYPES.has(c.type)
+                  && (c.from === uc.id || c.to === uc.id))
         .map(c => {
           const actorId = c.from === uc.id ? c.to : c.from;
           return elements.find(e => e.id === actorId && e.type === 'actor')?.name || '';
@@ -1328,28 +1398,58 @@ class CodeGenerator {
         .filter(Boolean);
       doc += `- **Actors**: ${actorNames.join(', ') || 'none'}\n`;
 
-      // BUG FIX: Also list <<include>> and <<extend>> relationships so the
-      // documentation reflects the full diagram structure, not just direct actor ties.
+      // <<include>> relationships
       const includes = connections
-        .filter(c => c.from === uc.id && (c.type === 'include' || c.label?.includes('include')))
+        .filter(c => c.from === uc.id
+                  && (c.type === 'include'
+                    || c.label?.toLowerCase().includes('include')
+                    || c.label?.includes('<<include>>')))
         .map(c => elements.find(e => e.id === c.to)?.name || '')
         .filter(Boolean);
       if (includes.length) doc += `- **Includes**: ${includes.join(', ')}\n`;
 
+      // <<extend>> relationships
       const extendedBy = connections
-        .filter(c => c.to === uc.id && (c.type === 'extend' || c.label?.includes('extend')))
+        .filter(c => c.to === uc.id
+                  && (c.type === 'extend'
+                    || c.label?.toLowerCase().includes('extend')
+                    || c.label?.includes('<<extend>>')))
         .map(c => elements.find(e => e.id === c.from)?.name || '')
         .filter(Boolean);
       if (extendedBy.length) doc += `- **Extended by**: ${extendedBy.join(', ')}\n`;
 
       const includedBy = connections
-        .filter(c => c.to === uc.id && (c.type === 'include' || c.label?.includes('include')))
+        .filter(c => c.to === uc.id
+                  && (c.type === 'include'
+                    || c.label?.toLowerCase().includes('include')
+                    || c.label?.includes('<<include>>')))
         .map(c => elements.find(e => e.id === c.from)?.name || '')
         .filter(Boolean);
       if (includedBy.length) doc += `- **Included by**: ${includedBy.join(', ')}\n`;
 
+      // Generalization (this use case specializes another)
+      const genConn = connections.find(
+        c => (c.type === 'generalization' || c.type === 'inheritance') && c.from === uc.id
+      );
+      const parentUc = genConn ? elements.find(e => e.id === genConn.to && e.type === 'usecase') : null;
+      if (parentUc) doc += `- **Specializes**: ${parentUc.name}\n`;
+
       doc += '\n';
     });
+
+    // ── Connection Summary ───────────────────────────────────
+    // Every connection is listed so the diff always shows a change
+    // when ANY arrow is added or removed on the canvas.
+    doc += '## Connections\n\n';
+    connections.forEach(c => {
+      const src = elements.find(e => e.id === c.from);
+      const tgt = elements.find(e => e.id === c.to);
+      if (!src || !tgt) return;
+      const label = c.label ? ` (${c.label})` : '';
+      doc += `- **${src.name}** --[${c.type}${label}]--> **${tgt.name}**\n`;
+    });
+    doc += '\n';
+
     return doc;
   }
 

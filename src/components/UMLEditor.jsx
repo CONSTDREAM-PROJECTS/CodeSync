@@ -105,6 +105,13 @@ const UMLEditor = ({ currentUser, onLoginSuccess, onLogout }) => {
   const [elements, setElements] = useState([]);
   const [connections, setConnections] = useState([]);
 
+  // Live refs — always point to the current elements/connections so callbacks
+  // that close over these never read stale values (e.g. onCodeEdit saveToHistory).
+  const elementsRef    = useRef([]);
+  const connectionsRef = useRef([]);
+  useEffect(() => { elementsRef.current    = elements;    }, [elements]);
+  useEffect(() => { connectionsRef.current = connections; }, [connections]);
+
   // ── Selection state ────────────────────────────────────────
   // selectedElements: array (supports multi-select via Ctrl+click).
   // selectedConnection: single selected connection line (mutually exclusive with elements).
@@ -2169,6 +2176,84 @@ const UMLEditor = ({ currentUser, onLoginSuccess, onLogout }) => {
         setSelectedConnection={setSelectedConnection}
         saveToHistory={saveToHistory}
         onCopySuccess={(msg, type = 'success') => showToast(msg, type)}
+        onCodeEdit={(importedElements, importedConnections, options = {}) => {
+          const currentEls   = elementsRef.current;
+          const currentConns = connectionsRef.current;
+
+          let mergedElements    = importedElements;
+          let mergedConnections = importedConnections;
+
+          if (options.diagramType && options.diagramType !== selectedDiagram) {
+            setSelectedDiagram(options.diagramType);
+          }
+
+          // ── USE-CASE LIVE SYNC: position-preserving merge ──────────────────
+          // For use-case diagrams with replaceAll, the converter re-parses the
+          // entire code file and returns the correct set of elements+connections.
+          // Instead of blindly replacing everything, we:
+          //   1. Keep ALL existing canvas elements exactly where they are (positions
+          //      preserved — actors, use cases, system boundaries).
+          //   2. Add any NEW elements the code introduced (new actors/use cases).
+          //   3. Replace connections entirely with what the code says — this is the
+          //      surgical part: a deleted method removes its arrow, an added method
+          //      adds its arrow, nothing else changes.
+          // This makes the bidirectional sync behave exactly as expected:
+          // delete a method → only that connection disappears.
+          // Ctrl+Z in code → connection reappears. Diagram layout never moves.
+          if (options.replaceAll && selectedDiagram === 'usecase') {
+            // Build a name→element map of what the canvas currently has
+            const norm = (s) => (s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+            const currentByName = new Map(currentEls.map(el => [norm(el.name), el]));
+
+            // For each element the converter produced, reuse the existing canvas
+            // node if one with the same name exists (keeps id + position), otherwise
+            // accept the new node (it's genuinely new).
+            mergedElements = importedElements.map(imported => {
+              const existing = currentByName.get(norm(imported.name));
+              return existing ? { ...existing } : imported;
+            });
+
+            // Connections come entirely from the code parse — they reference the
+            // correct IDs because the converter used existingElements to reuse IDs.
+            mergedConnections = importedConnections;
+
+            if (options.fromCodeUndo) {
+              setElements(mergedElements);
+              setConnections(mergedConnections);
+              return;
+            }
+            saveToHistory(currentEls, currentConns);
+            setElements(mergedElements);
+            setConnections(mergedConnections);
+            return;
+          }
+
+          // ── ALL OTHER CASES (class diagram live sync, manual imports) ───────
+          if (!options.replaceAll && (currentEls.length > 0 || currentConns.length > 0)) {
+            const maxX = Math.max(...currentEls.map(e => e.x + e.width), 0);
+            mergedElements = [
+              ...currentEls,
+              ...importedElements.map(el => ({ ...el, x: el.x + maxX + 100 }))
+            ];
+            mergedConnections = [...currentConns, ...importedConnections];
+          }
+
+          if (options.fromCodeUndo) {
+            setElements(mergedElements);
+            setConnections(mergedConnections);
+            return;
+          }
+
+          if (options.replaceAll) {
+            saveToHistory(currentEls, currentConns);
+          } else {
+            saveToHistory(currentEls, currentConns);
+            saveToHistory(mergedElements, mergedConnections);
+          }
+          setElements(mergedElements);
+          setConnections(mergedConnections);
+        }}
+        selectedDiagram={selectedDiagram}
         language={language}
         generatedCode={generatedCode}
         generatedFiles={generatedFiles}
