@@ -2272,9 +2272,24 @@ const UMLEditor = ({ currentUser, onLoginSuccess, onLogout }) => {
             const norm = (s) => (s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
             const currentByName = new Map(currentEls.map(el => [norm(el.name), el]));
             const idMap = new Map();
+            const isConcreteClass = (el) =>
+              ['class', 'interface', 'abstract', 'enum'].includes(el?.type) && !el?.isExternal;
+            const importedNames = new Set(importedElements.map(el => norm(el.name)));
+            const currentNames = new Set(currentEls.map(el => norm(el.name)));
+            const unmatchedCurrentConcrete = currentEls.filter(el =>
+              isConcreteClass(el) && !importedNames.has(norm(el.name))
+            );
+            const unmatchedImportedConcrete = importedElements.filter(el =>
+              isConcreteClass(el) && !currentNames.has(norm(el.name))
+            );
+            const renamedByImportedId = new Map();
+
+            if (unmatchedCurrentConcrete.length === 1 && unmatchedImportedConcrete.length === 1) {
+              renamedByImportedId.set(unmatchedImportedConcrete[0].id, unmatchedCurrentConcrete[0]);
+            }
 
             mergedElements = importedElements.map(imported => {
-              const existing = currentByName.get(norm(imported.name));
+              const existing = currentByName.get(norm(imported.name)) || renamedByImportedId.get(imported.id);
               if (!existing) {
                 idMap.set(imported.id, imported.id);
                 return imported;
@@ -2299,8 +2314,10 @@ const UMLEditor = ({ currentUser, onLoginSuccess, onLogout }) => {
                 methods: importedHasDetails ? (imported.methods || []) : (existing.methods || []),
                 stereotype: importedHasDetails
                   ? (imported.stereotype || existing.stereotype || '')
-                  : (existing.stereotype || imported.stereotype || ''),
-                isExternal: importedHasDetails ? (imported.isExternal || false) : (existing.isExternal || false),
+                  : (existingHasDetails && existing.stereotype === 'external'
+                    ? ''
+                    : (existing.stereotype || imported.stereotype || '')),
+                isExternal: importedHasDetails ? (imported.isExternal || false) : false,
               };
 
               if (!importedHasDetails && existingHasDetails) {
