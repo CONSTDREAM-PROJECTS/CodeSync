@@ -1462,15 +1462,23 @@ class CodeToUMLConverter {
             if (!methods.includes(m[1])) methods.push(m[1]);
           }
         } else {
-          // IMPORTANT: the prefix (return type or async keyword) is REQUIRED —
-          // not optional — so we only match actual method *declarations* like
-          //   "public boolean executeSearchDocsFullText() {"
-          // and never match *calls* inside a method body like
-          //   "handler.executeDownloadDocs(); // <<include>>"
-          // Making the prefix optional was the root cause of Name actor getting
-          // spurious direct associations to shared use cases (Download docs,
-          // Preview doc) that should only be <<include>> targets.
-          const re = /(?:public\s+\w+\s+|async\s+)(execute\w+)\s*\(/g;
+          // Match execute* method *declarations* only.
+          //
+          // BUG FIX — missing connections for package-private methods:
+          // The previous regex required an explicit "public" keyword:
+          //   /(?:public\s+\w+\s+|async\s+)(execute\w+)\s*\(/g
+          // Methods declared without an access modifier (package-private) like
+          //   "void executeLogIn() {"
+          // or with other modifiers like "protected" were silently skipped,
+          // causing their use-case connections to never be drawn (e.g. BankAdmin
+          // → Log In was missing because executeLogIn() lacked "public").
+          //
+          // FIX: access modifier is now optional; static/final are also optional.
+          // A return-type word (\w[\w<>,\s]*) before execute is still REQUIRED
+          // so that call-sites like "handler.executeX();" — which have a dot,
+          // not a space, before execute — can never accidentally match, preserving
+          // the guard against phantom actor→shared-use-case direct edges.
+          const re = /(?:(?:public|protected|private)\s+)?(?:static\s+)?(?:final\s+)?\w[\w<>,\s]*\s+(execute\w+)\s*\(/g;
           let m;
           while ((m = re.exec(body)) !== null) {
             if (!methods.includes(m[1])) methods.push(m[1]);
