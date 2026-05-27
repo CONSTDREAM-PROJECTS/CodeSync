@@ -1455,6 +1455,12 @@ class CodeToUMLConverter {
           const re = /def\s+(execute_\w+)\s*\(self\)/g;
           let m;
           while ((m = re.exec(body)) !== null) methods.push(m[1]);
+        } else if (lang === 'JavaScript') {
+          const re = /(?:^|\n)\s*(?:async\s+)?(execute\w+)\s*\([^)]*\)\s*\{/g;
+          let m;
+          while ((m = re.exec(body)) !== null) {
+            if (!methods.includes(m[1])) methods.push(m[1]);
+          }
         } else {
           // IMPORTANT: the prefix (return type or async keyword) is REQUIRED —
           // not optional — so we only match actual method *declarations* like
@@ -1476,14 +1482,14 @@ class CodeToUMLConverter {
       const getRelCalls = (methodBody, lang) => {
         const includes = [], extends_ = [];
         if (lang === 'Python') {
-          const incRe = /(?:self|handler)\.execute_(\w+)\(\).*#\s*<<include>>/g;
-          const extRe = /#\s*(?:self|handler)\.execute_(\w+)\(\).*#\s*<<extend>>/g;
+          const incRe = /(?:self(?:\.handler)?|handler)\.execute_(\w+)\(\).*#\s*<<include>>/g;
+          const extRe = /#\s*(?:self(?:\.handler)?|handler)\.execute_(\w+)\(\).*#\s*<<extend>>/g;
           let m;
           while ((m = incRe.exec(methodBody)) !== null) includes.push(m[1]);
           while ((m = extRe.exec(methodBody)) !== null) extends_.push(m[1]);
         } else {
-          const incRe = /(?:handler|this)\.execute(\w+)\(\);\s*\/\/\s*<<include>>/g;
-          const extRe = /\/\/\s*(?:handler|this)\.execute(\w+)\(\);\s*\/\/\s*<<extend>>/g;
+          const incRe = /(?:this(?:\.handler)?|handler)\.execute(\w+)\(\);\s*\/\/\s*<<include>>/g;
+          const extRe = /\/\/\s*(?:this(?:\.handler)?|handler)\.execute(\w+)\(\);\s*\/\/\s*<<extend>>/g;
           let m;
           while ((m = incRe.exec(methodBody)) !== null) includes.push(m[1]);
           while ((m = extRe.exec(methodBody)) !== null) extends_.push(m[1]);
@@ -1492,10 +1498,15 @@ class CodeToUMLConverter {
       };
 
       // ── lazy use-case registry — reuses existing nodes by name ──
+      const getUseCaseNameFromBody = (methodBody) => {
+        const match = methodBody.match(/Execute use case:\s*([^\n|*"]+)/i);
+        return match ? match[1].trim() : '';
+      };
+
       const ucByMethodSuffix = new Map();
-      const getOrCreateUC = (suffix) => {
+      const getOrCreateUC = (suffix, displayName = '') => {
         if (ucByMethodSuffix.has(suffix)) return ucByMethodSuffix.get(suffix);
-        const name = fromMethodName(
+        const name = displayName || fromMethodName(
           language === 'Python' ? 'execute_' + suffix : 'execute' + suffix
         );
         // Try to reuse an existing usecase element with the same name
@@ -1554,19 +1565,6 @@ class CodeToUMLConverter {
               : method.replace(/^execute/, '');
             if (!suffix) continue;
 
-            const ucId = getOrCreateUC(suffix);
-
-            // Association: actor → use case
-            connections.push({
-              id:   uid(),
-              type: 'association',
-              from: actor.id,
-              to:   ucId,
-              fromMultiplicity: '', toMultiplicity: '',
-              label: '', fromRole: '', toRole: '',
-            });
-
-            // Extract this method's body to find include/extend calls
             let methodBody = '';
             if (language === 'Python') {
               const mRe = new RegExp(`def\\s+${method}\\s*\\(self\\)[\\s\\S]*?(?=\\n    def |$)`);
@@ -1577,6 +1575,18 @@ class CodeToUMLConverter {
               const mM  = block.body.match(mRe);
               if (mM) methodBody = mM[1];
             }
+
+            const ucId = getOrCreateUC(suffix, getUseCaseNameFromBody(methodBody));
+
+            // Association: actor → use case
+            connections.push({
+              id:   uid(),
+              type: 'association',
+              from: actor.id,
+              to:   ucId,
+              fromMultiplicity: '', toMultiplicity: '',
+              label: '', fromRole: '', toRole: '',
+            });
 
             const { includes, extends_ } = getRelCalls(methodBody, language);
 
@@ -1603,13 +1613,30 @@ class CodeToUMLConverter {
               });
             }
           }
+        } else if (/UseCaseHandler|SharedHandler/i.test(block.name)) {
+          for (const method of methods) {
+            const suffix = language === 'Python'
+              ? method.replace(/^execute_/, '')
+              : method.replace(/^execute/, '');
+            if (!suffix) continue;
+
+            let methodBody = '';
+            if (language === 'Python') {
+              const mRe = new RegExp(`def\\s+${method}\\s*\\(self\\)[\\s\\S]*?(?=\\n    def |$)`);
+              const mM  = block.body.match(mRe);
+              if (mM) methodBody = mM[0];
+            } else {
+              const mRe = new RegExp(`execute${suffix}\\s*\\([^)]*\\)\\s*\\{([\\s\\S]*?)\\n    \\}`);
+              const mM  = block.body.match(mRe);
+              if (mM) methodBody = mM[1];
+            }
+
+            getOrCreateUC(suffix, getUseCaseNameFromBody(methodBody));
+          }
         }
-        // Handler classes (UseCaseHandler, UseCaseRunner, SharedHandler) are
-        // intentionally skipped here. Their methods only become use-case nodes
-        // when an actor class explicitly calls handler.executeXxx() with an
-        // <<include>> or <<extend>> comment. Creating nodes unconditionally for
-        // every handler method produced orphan use-case nodes ("Download docs",
-        // "Preview doc", "Add user") and a phantom "Use Case Runner" actor.
+        // UseCaseRunner is intentionally skipped. Shared handler classes are
+        // parsed as free-standing use-case nodes so unassociated/shared use
+        // cases are not lost, while the runner never becomes a fake actor.
       }
 
       if (elements.length === 0) {
