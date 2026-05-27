@@ -2196,33 +2196,137 @@ const UMLEditor = ({ currentUser, onLoginSuccess, onLogout }) => {
           let mergedElements    = importedElements;
           let mergedConnections = importedConnections;
 
+          const normElementName = (s) => (s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+          const hasElementDetails = (el) =>
+            (el?.attributes?.length || 0) > 0 ||
+            (el?.methods?.length || 0) > 0 ||
+            !!el?.description ||
+            !!el?.stereotype ||
+            !!el?.className ||
+            !!el?.state;
+          const mergeWithExistingElement = (imported, existing, options = {}) => {
+            if (!existing) return imported;
+            const importedHasDetails = hasElementDetails(imported) || options.importedIsAuthoritative;
+            return {
+              ...imported,
+              id: existing.id,
+              x: existing.x,
+              y: existing.y,
+              width: existing.width,
+              height: existing.height,
+              attributes: importedHasDetails ? (imported.attributes || []) : (existing.attributes || []),
+              methods: importedHasDetails ? (imported.methods || []) : (existing.methods || []),
+              properties: {
+                ...(existing.properties || {}),
+                ...(imported.properties || {}),
+              },
+              description: imported.description || existing.description,
+              stereotype: imported.stereotype || existing.stereotype || '',
+              className: imported.className || existing.className,
+              state: imported.state || existing.state,
+              isExternal: options.keepExistingExternalFlag
+                ? (existing.isExternal || false)
+                : (imported.isExternal || false),
+            };
+          };
+          const remapConnections = (connectionsToMap, idMap) => connectionsToMap.map(conn => ({
+            ...conn,
+            from: idMap.get(conn.from) || conn.from,
+            to: idMap.get(conn.to) || conn.to,
+            source: idMap.get(conn.source) || conn.source,
+            target: idMap.get(conn.target) || conn.target,
+          }));
+
           if (options.diagramType && options.diagramType !== selectedDiagram) {
             setSelectedDiagram(options.diagramType);
           }
 
           // ── SEQUENCE DIAGRAM LIVE SYNC ─────────────────────────────────
           if (options.replaceAll && selectedDiagram === 'sequence') {
+            const currentByName = new Map(currentEls.map(el => [normElementName(el.name), el]));
+            const idMap = new Map();
+
+            mergedElements = importedElements.map(imported => {
+              const existing = currentByName.get(normElementName(imported.name));
+              const finalElement = mergeWithExistingElement(imported, existing, {
+                importedIsAuthoritative: true,
+              });
+              idMap.set(imported.id, finalElement.id);
+              return finalElement;
+            });
+            mergedConnections = remapConnections(importedConnections, idMap);
+
             if (options.fromCodeUndo) {
-              setElements(importedElements);
-              setConnections(importedConnections);
+              setElements(mergedElements);
+              setConnections(mergedConnections);
               return;
             }
             saveToHistory(currentEls, currentConns);
-            setElements(importedElements);
-            setConnections(importedConnections);
+            setElements(mergedElements);
+            setConnections(mergedConnections);
             return;
           }
 
           // ── CLASS DIAGRAM LIVE SYNC ────────────────────────────────────
           if (options.replaceAll && selectedDiagram === 'class') {
+            const norm = (s) => (s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+            const currentByName = new Map(currentEls.map(el => [norm(el.name), el]));
+            const idMap = new Map();
+
+            mergedElements = importedElements.map(imported => {
+              const existing = currentByName.get(norm(imported.name));
+              if (!existing) {
+                idMap.set(imported.id, imported.id);
+                return imported;
+              }
+
+              const importedHasDetails =
+                (imported.attributes?.length || 0) > 0 ||
+                (imported.methods?.length || 0) > 0 ||
+                !imported.isExternal;
+              const existingHasDetails =
+                (existing.attributes?.length || 0) > 0 ||
+                (existing.methods?.length || 0) > 0;
+
+              const finalElement = {
+                ...imported,
+                id: existing.id,
+                x: existing.x,
+                y: existing.y,
+                width: existing.width,
+                height: existing.height,
+                attributes: importedHasDetails ? (imported.attributes || []) : (existing.attributes || []),
+                methods: importedHasDetails ? (imported.methods || []) : (existing.methods || []),
+                stereotype: importedHasDetails
+                  ? (imported.stereotype || existing.stereotype || '')
+                  : (existing.stereotype || imported.stereotype || ''),
+                isExternal: importedHasDetails ? (imported.isExternal || false) : (existing.isExternal || false),
+              };
+
+              if (!importedHasDetails && existingHasDetails) {
+                finalElement.type = existing.type || imported.type;
+              }
+
+              idMap.set(imported.id, finalElement.id);
+              return finalElement;
+            });
+
+            mergedConnections = importedConnections.map(conn => ({
+              ...conn,
+              from: idMap.get(conn.from) || conn.from,
+              to: idMap.get(conn.to) || conn.to,
+              source: idMap.get(conn.source) || conn.source,
+              target: idMap.get(conn.target) || conn.target,
+            }));
+
             if (options.fromCodeUndo) {
-              setElements(importedElements);
-              setConnections(importedConnections);
+              setElements(mergedElements);
+              setConnections(mergedConnections);
               return;
             }
             saveToHistory(currentEls, currentConns);
-            setElements(importedElements);
-            setConnections(importedConnections);
+            setElements(mergedElements);
+            setConnections(mergedConnections);
             return;
           }
 
@@ -2252,7 +2356,9 @@ const UMLEditor = ({ currentUser, onLoginSuccess, onLogout }) => {
             // so regenerated connections still point at the preserved canvas nodes.
             mergedElements = importedElements.map(imported => {
               const existing = currentByName.get(norm(imported.name));
-              const finalElement = existing ? { ...existing } : imported;
+              const finalElement = mergeWithExistingElement(imported, existing, {
+                importedIsAuthoritative: true,
+              });
               idMap.set(imported.id, finalElement.id);
               return finalElement;
             });
@@ -2260,13 +2366,7 @@ const UMLEditor = ({ currentUser, onLoginSuccess, onLogout }) => {
             // Connections come entirely from the code parse, but their endpoints
             // may still reference freshly-parsed IDs. Rewrite them to the final
             // preserved element IDs so use-case live sync stays bidirectional.
-            mergedConnections = importedConnections.map(conn => ({
-              ...conn,
-              from: idMap.get(conn.from) || conn.from,
-              to: idMap.get(conn.to) || conn.to,
-              source: idMap.get(conn.source) || conn.source,
-              target: idMap.get(conn.target) || conn.target,
-            }));
+            mergedConnections = remapConnections(importedConnections, idMap);
 
             if (options.fromCodeUndo) {
               setElements(mergedElements);
