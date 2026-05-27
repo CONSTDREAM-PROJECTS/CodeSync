@@ -2200,6 +2200,19 @@ const UMLEditor = ({ currentUser, onLoginSuccess, onLogout }) => {
             return;
           }
 
+          // ── CLASS DIAGRAM LIVE SYNC ────────────────────────────────────
+          if (options.replaceAll && selectedDiagram === 'class') {
+            if (options.fromCodeUndo) {
+              setElements(importedElements);
+              setConnections(importedConnections);
+              return;
+            }
+            saveToHistory(currentEls, currentConns);
+            setElements(importedElements);
+            setConnections(importedConnections);
+            return;
+          }
+
           // ── USE-CASE LIVE SYNC: position-preserving merge ──────────────────
           // For use-case diagrams with replaceAll, the converter re-parses the
           // entire code file and returns the correct set of elements+connections.
@@ -2218,17 +2231,29 @@ const UMLEditor = ({ currentUser, onLoginSuccess, onLogout }) => {
             const norm = (s) => (s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
             const currentByName = new Map(currentEls.map(el => [norm(el.name), el]));
 
+            const idMap = new Map();
+
             // For each element the converter produced, reuse the existing canvas
             // node if one with the same name exists (keeps id + position), otherwise
-            // accept the new node (it's genuinely new).
+            // accept the new node (it's genuinely new). Track imported->final IDs
+            // so regenerated connections still point at the preserved canvas nodes.
             mergedElements = importedElements.map(imported => {
               const existing = currentByName.get(norm(imported.name));
-              return existing ? { ...existing } : imported;
+              const finalElement = existing ? { ...existing } : imported;
+              idMap.set(imported.id, finalElement.id);
+              return finalElement;
             });
 
-            // Connections come entirely from the code parse — they reference the
-            // correct IDs because the converter used existingElements to reuse IDs.
-            mergedConnections = importedConnections;
+            // Connections come entirely from the code parse, but their endpoints
+            // may still reference freshly-parsed IDs. Rewrite them to the final
+            // preserved element IDs so use-case live sync stays bidirectional.
+            mergedConnections = importedConnections.map(conn => ({
+              ...conn,
+              from: idMap.get(conn.from) || conn.from,
+              to: idMap.get(conn.to) || conn.to,
+              source: idMap.get(conn.source) || conn.source,
+              target: idMap.get(conn.target) || conn.target,
+            }));
 
             if (options.fromCodeUndo) {
               setElements(mergedElements);
