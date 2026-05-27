@@ -447,18 +447,54 @@ const CodeImportModal = ({ onImport, onClose, diagramType = 'class' }) => {
   }, [readFile]);
 
   // ── Convert handler ──────────────────────────────────────────────────────
+  const inferDiagramType = (code, result) => {
+    const metadataType = result?.metadata?.diagramType;
+    if (['class', 'usecase', 'sequence'].includes(metadataType)) {
+      return metadataType;
+    }
+
+    if (result?.elements?.some(el => el.diagramType === 'usecase' || el.type === 'actor' || el.type === 'usecase')) {
+      return 'usecase';
+    }
+
+    if (result?.elements?.some(el => el.diagramType === 'sequence' || el.type === 'lifeline')) {
+      return 'sequence';
+    }
+
+    if (/@Actor\s*\(|@UseCase\s*\(|@Association\s*\(|@Includes\s*\(|@Extends\s*\(/.test(code)) {
+      return 'usecase';
+    }
+
+    if (/\b(sequenceDiagram|participant|activate|deactivate)\b/i.test(code) || /[A-Za-z0-9_]+\s*[-=]+>>?\s*[A-Za-z0-9_]+/.test(code)) {
+      return 'sequence';
+    }
+
+    return ['class', 'usecase', 'sequence'].includes(diagramType) ? diagramType : 'class';
+  };
+
   const handleConvert = async () => {
     if (!sourceCode.trim()) {
       setConversionResult({ success: false, message: 'Please paste or drop some source code first.' });
       return;
     }
     setIsConverting(true);
-    // Route to sequence parser when on Sequence Diagram
+    const hasUseCaseAnnotations = /@Actor\s*\(|@UseCase\s*\(|@Association\s*\(|@Includes\s*\(|@Extends\s*\(/.test(sourceCode);
+    const isUseCaseMode = diagramType === 'usecase' && !hasUseCaseAnnotations;
     const isSequenceMode = diagramType === 'sequence';
     const result = isSequenceMode
       ? CodeToUMLConverter.convertCodeToUMLSequence(sourceCode, language)
-      : CodeToUMLConverter.convertCodeToUML(sourceCode, language);
-    setConversionResult(result);
+      : isUseCaseMode
+        ? CodeToUMLConverter.convertCodeToUMLUseCase(sourceCode, language)
+        : CodeToUMLConverter.convertCodeToUML(sourceCode, language);
+    const detectedDiagramType = inferDiagramType(sourceCode, result);
+    setConversionResult({
+      ...result,
+      metadata: {
+        ...(result.metadata || {}),
+        sourceLanguage: result.metadata?.sourceLanguage || language,
+        diagramType: detectedDiagramType,
+      },
+    });
     setIsConverting(false);
   };
 
