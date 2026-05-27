@@ -2187,6 +2187,19 @@ const UMLEditor = ({ currentUser, onLoginSuccess, onLogout }) => {
             setSelectedDiagram(options.diagramType);
           }
 
+          // ── SEQUENCE DIAGRAM LIVE SYNC ─────────────────────────────────
+          if (options.replaceAll && selectedDiagram === 'sequence') {
+            if (options.fromCodeUndo) {
+              setElements(importedElements);
+              setConnections(importedConnections);
+              return;
+            }
+            saveToHistory(currentEls, currentConns);
+            setElements(importedElements);
+            setConnections(importedConnections);
+            return;
+          }
+
           // ── USE-CASE LIVE SYNC: position-preserving merge ──────────────────
           // For use-case diagrams with replaceAll, the converter re-parses the
           // entire code file and returns the correct set of elements+connections.
