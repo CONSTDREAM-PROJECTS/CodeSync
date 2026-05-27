@@ -1159,6 +1159,10 @@ class CodeToUMLConverter {
 
   static convertCodeToUMLSequence(sourceCode, language = 'Java') {
     try {
+      if (/^#\s*Sequence Diagram Documentation/m.test(sourceCode)) {
+        return this.convertSequenceDocumentationToUML(sourceCode, language);
+      }
+
       let lifelines, messages;
       switch (language.toLowerCase()) {
         case 'python':
@@ -1217,6 +1221,7 @@ class CodeToUMLConverter {
         elements, connections, patterns: [],
         metadata: {
           sourceLanguage: language,
+          diagramType: 'sequence',
           totalClasses: lifelines.length, totalMethods: 0,
           totalAttributes: 0, relationships: connections.length, patternsDetected: 0
         }
@@ -1375,6 +1380,10 @@ class CodeToUMLConverter {
    */
   static convertCodeToUMLUseCase(sourceCode, language = 'Java', existingElements = []) {
     try {
+      if (/^#\s*Use Case Diagram Documentation/m.test(sourceCode)) {
+        return this.convertUseCaseDocumentationToUML(sourceCode, language, existingElements);
+      }
+
       const elements    = [];
       const connections = [];
       let idCounter     = Date.now();
@@ -1624,11 +1633,211 @@ class CodeToUMLConverter {
         return true;
       });
 
-      return { success: true, elements, connections: dedupedConnections, replaceAll: true };
+      return {
+        success: true,
+        elements,
+        connections: dedupedConnections,
+        replaceAll: true,
+        metadata: {
+          sourceLanguage: language,
+          diagramType: 'usecase',
+          totalClasses: elements.length,
+          totalMethods: 0,
+          totalAttributes: 0,
+          relationships: dedupedConnections.length,
+          patternsDetected: 0
+        }
+      };
 
     } catch (err) {
       return { success: false, message: err.message || 'Unexpected error parsing use case code.', elements: [], connections: [] };
     }
+  }
+
+  static convertUseCaseDocumentationToUML(sourceCode, language = 'Java', existingElements = []) {
+    const norm = (s) => (s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+    const findExisting = (type, name) =>
+      existingElements.find(e => e.type === type && norm(e.name) === norm(name));
+    const uid = (prefix) => `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    const clean = (s) => (s || '').trim();
+    const elements = [];
+    const connections = [];
+    const actors = new Map();
+    const usecases = new Map();
+
+    const addElement = (type, name) => {
+      const map = type === 'actor' ? actors : usecases;
+      const key = norm(name);
+      if (map.has(key)) return map.get(key);
+
+      const existing = findExisting(type, name);
+      const count = elements.filter(e => e.type === type).length;
+      const element = existing ? { ...existing } : {
+        id: uid(type === 'actor' ? 'actor' : 'usecase'),
+        type,
+        diagramType: 'usecase',
+        name,
+        x: type === 'actor' ? 80 + count * 200 : 300 + (count % 4) * 220,
+        y: type === 'actor' ? 120 : 260 + Math.floor(count / 4) * 130,
+        width: type === 'actor' ? 80 : 160,
+        height: type === 'actor' ? 100 : 60,
+        properties: {}
+      };
+      elements.push(element);
+      map.set(key, element);
+      return element;
+    };
+
+    const sectionBetween = (startHeader, endHeader) => {
+      const start = sourceCode.indexOf(startHeader);
+      if (start === -1) return '';
+      const end = endHeader ? sourceCode.indexOf(endHeader, start + startHeader.length) : -1;
+      return sourceCode.slice(start + startHeader.length, end === -1 ? sourceCode.length : end);
+    };
+
+    const actorSection = sectionBetween('## Actors', '## Use Cases');
+    const useCaseSection = sectionBetween('## Use Cases', '## Connections');
+
+    let match;
+    const headingRe = /^###\s+(.+)$/gm;
+    while ((match = headingRe.exec(actorSection)) !== null) {
+      addElement('actor', clean(match[1]));
+    }
+    while ((match = headingRe.exec(useCaseSection)) !== null) {
+      addElement('usecase', clean(match[1]));
+    }
+
+    const connRe = /^-\s+\*\*(.+?)\*\*\s+--\[(\w+)(?:\s+\((.*?)\))?\]-->\s+\*\*(.+?)\*\*/gm;
+    while ((match = connRe.exec(sourceCode)) !== null) {
+      const fromName = clean(match[1]);
+      const type = clean(match[2]) || 'association';
+      const label = clean(match[3]);
+      const toName = clean(match[4]);
+      const source =
+        actors.get(norm(fromName)) ||
+        usecases.get(norm(fromName)) ||
+        addElement(type === 'include' || type === 'extend' ? 'usecase' : 'actor', fromName);
+      const target =
+        actors.get(norm(toName)) ||
+        usecases.get(norm(toName)) ||
+        addElement(type === 'include' || type === 'extend' ? 'usecase' : 'usecase', toName);
+
+      connections.push({
+        id: uid('conn'),
+        type,
+        from: source.id,
+        to: target.id,
+        label,
+        fromMultiplicity: '',
+        toMultiplicity: '',
+        fromRole: '',
+        toRole: ''
+      });
+    }
+
+    if (elements.length === 0) {
+      return { success: false, message: 'No use case documentation entries found.', elements: [], connections: [] };
+    }
+
+    return {
+      success: true,
+      replaceAll: true,
+      elements,
+      connections,
+      patterns: [],
+      metadata: {
+        sourceLanguage: language,
+        diagramType: 'usecase',
+        totalClasses: elements.length,
+        totalMethods: 0,
+        totalAttributes: 0,
+        relationships: connections.length,
+        patternsDetected: 0
+      }
+    };
+  }
+
+  static convertSequenceDocumentationToUML(sourceCode, language = 'Java') {
+    const uid = (prefix) => `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    const clean = (s) => (s || '').trim();
+    const elements = [];
+    const connections = [];
+    const byName = new Map();
+
+    const addLifeline = (name) => {
+      const key = clean(name).toLowerCase();
+      if (byName.has(key)) return byName.get(key);
+      const idx = elements.length;
+      const element = {
+        id: uid('seq'),
+        type: 'lifeline',
+        diagramType: 'sequence',
+        name: clean(name),
+        x: 80 + idx * 220,
+        y: 80,
+        width: 160,
+        height: 100,
+        attributes: [],
+        methods: [],
+        stereotype: ''
+      };
+      elements.push(element);
+      byName.set(key, element);
+      return element;
+    };
+
+    const participantSectionStart = sourceCode.indexOf('## Participants');
+    const flowSectionStart = sourceCode.indexOf('## Message Flow');
+    const participantSection = participantSectionStart === -1
+      ? ''
+      : sourceCode.slice(participantSectionStart, flowSectionStart === -1 ? sourceCode.length : flowSectionStart);
+
+    let match;
+    const headingRe = /^###\s+(.+)$/gm;
+    while ((match = headingRe.exec(participantSection)) !== null) {
+      addLifeline(match[1]);
+    }
+
+    const messageRe = /^\d+\.\s+\*\*(.+?)\*\*.*?\*\*(.+?)\*\*:\s*(.+)$/gm;
+    while ((match = messageRe.exec(sourceCode)) !== null) {
+      const source = addLifeline(match[1]);
+      const target = addLifeline(match[2]);
+      const label = clean(match[3]);
+      if (source.id === target.id) continue;
+      connections.push({
+        id: uid('conn'),
+        from: source.id,
+        to: target.id,
+        type: label.toLowerCase().includes('return') ? 'return' : 'message',
+        label,
+        fromMultiplicity: '',
+        toMultiplicity: '',
+        fromRole: '',
+        toRole: ''
+      });
+    }
+
+    if (elements.length === 0) {
+      return { success: false, message: 'No sequence documentation entries found.', elements: [], connections: [] };
+    }
+
+    return {
+      success: true,
+      replaceAll: true,
+      message: `Imported ${elements.length} lifelines and ${connections.length} messages from sequence documentation`,
+      elements,
+      connections,
+      patterns: [],
+      metadata: {
+        sourceLanguage: language,
+        diagramType: 'sequence',
+        totalClasses: elements.length,
+        totalMethods: 0,
+        totalAttributes: 0,
+        relationships: connections.length,
+        patternsDetected: 0
+      }
+    };
   }
 
 }
