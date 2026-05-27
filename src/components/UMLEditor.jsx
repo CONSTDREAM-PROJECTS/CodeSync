@@ -931,7 +931,17 @@ const UMLEditor = ({ currentUser, onLoginSuccess, onLogout }) => {
     }
 
     // ── Step 3: Generate ──────────────────────────────────
-    const files = CodeGenerator.splitIntoFiles(elements, connections, language, selectedDiagram);
+    let files = CodeGenerator.splitIntoFiles(elements, connections, language, selectedDiagram);
+    if (selectedDiagram === 'class' && files.length > 1) {
+      const extension = language === 'Python' ? 'py' : language === 'JavaScript' ? 'js' : 'java';
+      files = [
+        {
+          filename: `ClassDiagramPreview.${extension}`,
+          content: CodeGenerator.generateCode(elements, connections, language, selectedDiagram),
+        },
+        ...files,
+      ];
+    }
     setGeneratedFiles(files);
 
     if (files.length > 0) {
