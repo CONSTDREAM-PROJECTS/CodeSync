@@ -606,30 +606,26 @@ const PropertiesPanel = ({
    *
    * For CLASS and USE-CASE diagrams: updates the buffer and schedules a
    * debounced diagram re-parse 700 ms after the user stops typing.
+   * For SEQUENCE diagrams: uses a slightly longer debounce because parsing
+   * the interaction flow is more expensive.
    * The converter always does a full replaceAll from the current code text,
    * so deleting a method removes its connection, adding one creates it.
-   *
-   * For SEQUENCE diagrams only: buffer update only, no live sync, because
-   * sequence code structure doesn't map cleanly to incremental re-parsing.
    */
   const handleCodeChange = useCallback((value) => {
     setEditBuffer(value);
     setSyncStatus(null);
     setSyncError('');
 
-    // Sequence diagrams: text-only edit, no live sync (structure too different).
-    // Use-case diagrams: live sync IS enabled — the converter does a full
-    // replaceAll re-parse from the current code, which correctly adds/removes
-    // actors and connections to match exactly what the code says.
-    if (selectedDiagram === 'sequence') return;
-
     // Cancel any previously scheduled apply
     clearTimeout(applyDebounceRef.current);
 
-    // Schedule a new apply 700ms from now
+    // Schedule a new apply 700ms from now for class/usecase
+    // 1000ms for sequence (more complex parse)
+    const delay = selectedDiagram === 'sequence' ? 1000 : 700;
+
     applyDebounceRef.current = setTimeout(() => {
       applyCodeToDiagram(value, () => pushCodeHistory(value));
-    }, 700);
+    }, delay);
   }, [applyCodeToDiagram, pushCodeHistory, selectedDiagram]);
 
   /**
@@ -646,12 +642,9 @@ const PropertiesPanel = ({
     const isUndo = (e.ctrlKey || e.metaKey) && e.key === 'z' && !e.shiftKey;
     const isRedo = (e.ctrlKey || e.metaKey) && (e.key === 'y' || (e.key === 'z' && e.shiftKey));
 
-    // Sequence diagrams have no live sync — let browser handle Ctrl+Z natively.
-    if (selectedDiagram === 'sequence') return;
-
     if (isUndo) {
       e.preventDefault();
-      clearTimeout(applyDebounceRef.current); // cancel any pending debounce
+      clearTimeout(applyDebounceRef.current);
       if (codeHistoryIndexRef.current > 0) {
         codeHistoryIndexRef.current--;
         const prev = codeHistoryRef.current[codeHistoryIndexRef.current];
@@ -1062,7 +1055,7 @@ const PropertiesPanel = ({
               <p className="mt-2 text-xs text-gray-500 flex items-center gap-1">
                 <Pencil size={10} />
                 {selectedDiagram === 'sequence'
-                  ? 'Edit code · click "Code to Diagram" to apply changes to the diagram'
+                  ? 'Diagram updates live as you type · Ctrl+Z/Y to undo/redo'
                   : 'Diagram updates live as you type · Ctrl+Z/Y to undo/redo'}
               </p>
             )}
