@@ -465,6 +465,14 @@ const CodeImportModal = ({ onImport, onClose, diagramType = 'class' }) => {
       return 'usecase';
     }
 
+    if (/^#\s*Use Case Diagram Documentation/m.test(code)) {
+      return 'usecase';
+    }
+
+    if (/^#\s*Sequence Diagram Documentation/m.test(code)) {
+      return 'sequence';
+    }
+
     if (/\b(sequenceDiagram|participant|activate|deactivate)\b/i.test(code) || /[A-Za-z0-9_]+\s*[-=]+>>?\s*[A-Za-z0-9_]+/.test(code)) {
       return 'sequence';
     }
@@ -479,13 +487,18 @@ const CodeImportModal = ({ onImport, onClose, diagramType = 'class' }) => {
     }
     setIsConverting(true);
     const hasUseCaseAnnotations = /@Actor\s*\(|@UseCase\s*\(|@Association\s*\(|@Includes\s*\(|@Extends\s*\(/.test(sourceCode);
+    const isUseCaseDocumentation = /^#\s*Use Case Diagram Documentation/m.test(sourceCode);
+    const isSequenceDocumentation = /^#\s*Sequence Diagram Documentation/m.test(sourceCode);
     const isUseCaseMode = diagramType === 'usecase' && !hasUseCaseAnnotations;
-    const isSequenceMode = diagramType === 'sequence';
-    const result = isSequenceMode
-      ? CodeToUMLConverter.convertCodeToUMLSequence(sourceCode, language)
-      : isUseCaseMode
-        ? CodeToUMLConverter.convertCodeToUMLUseCase(sourceCode, language)
-        : CodeToUMLConverter.convertCodeToUML(sourceCode, language);
+    const isSequenceMode = diagramType === 'sequence' && !hasUseCaseAnnotations;
+    let result;
+    if (isUseCaseDocumentation || isUseCaseMode) {
+      result = CodeToUMLConverter.convertCodeToUMLUseCase(sourceCode, language);
+    } else if (isSequenceDocumentation || isSequenceMode) {
+      result = CodeToUMLConverter.convertCodeToUMLSequence(sourceCode, language);
+    } else {
+      result = CodeToUMLConverter.convertCodeToUML(sourceCode, language);
+    }
     const detectedDiagramType = inferDiagramType(sourceCode, result);
     setConversionResult({
       ...result,
