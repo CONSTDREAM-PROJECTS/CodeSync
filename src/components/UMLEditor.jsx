@@ -990,6 +990,9 @@ const UMLEditor = ({ currentUser, onLoginSuccess, onLogout }) => {
     if (options.diagramType && options.diagramType !== selectedDiagram) {
       setSelectedDiagram(options.diagramType);
     }
+    if (options.language && options.language !== language) {
+      setLanguage(options.language);
+    }
 
     // BUG C4 FIX: set state AND save history with identical arrays so
     // Ctrl+Z restores the correctly-positioned (offset) elements.
