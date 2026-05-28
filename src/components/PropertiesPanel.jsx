@@ -439,7 +439,6 @@ const PropertiesPanel = ({
   const [syncStatus, setSyncStatus] = useState(null);
   const [syncError,  setSyncError]  = useState('');
 
-<<<<<<< HEAD
   // ── Unified code+diagram undo/redo stack ──────────────────
   //
   // ROOT CAUSE OF ALL THREE SYNC BUGS:
@@ -461,15 +460,6 @@ const PropertiesPanel = ({
   // Each entry: { code: string, elements: [], connections: [] }
   const codeHistoryRef      = useRef([]);  // stack of paired snapshots
   const codeHistoryIndexRef = useRef(-1);  // -1 = empty / before first edit
-=======
-  // ── Code-side undo/redo stack ─────────────────────────────
-  // Maintained independently from the diagram's useHistory so that
-  // Ctrl+Z inside the code textarea rolls back code text AND re-parses
-  // to restore the diagram to the matching state.
-  // Each entry is a plain code string snapshot.
-  const codeHistoryRef      = useRef(['']);   // stack of code strings
-  const codeHistoryIndexRef = useRef(0);      // pointer into the stack
->>>>>>> 2c5ca15c83dfcb6a0a7a008d05de801217b76155
   // Debounce timer ref — cleared/reset on every keystroke so a snapshot
   // is only pushed (and diagram only parsed) after 700ms of inactivity.
   const applyDebounceRef    = useRef(null);
@@ -478,7 +468,6 @@ const PropertiesPanel = ({
   const textareaRef  = useRef(null);
   const highlightRef = useRef(null);
 
-<<<<<<< HEAD
   // Live refs so handleCodeChange can capture a pre-edit snapshot of the
   // full diagram state (elements + connections) before the debounced parse
   // fires — this is what the unified undo stack stores per entry.
@@ -486,12 +475,6 @@ const PropertiesPanel = ({
   const connectionsRef = useRef(connections);
   useEffect(() => { elementsRef.current    = elements;    }, [elements]);
   useEffect(() => { connectionsRef.current = connections; }, [connections]);
-=======
-  // Live ref so applyCodeToDiagram always reads the current canvas elements
-  // without capturing a stale closure — critical for use-case position reuse.
-  const elementsRef = useRef(elements);
-  useEffect(() => { elementsRef.current = elements; }, [elements]);
->>>>>>> 2c5ca15c83dfcb6a0a7a008d05de801217b76155
 
   // ── Helper: resolve prevCode for a given file tab index ──
   // Looks up the matching file from prevSnapshotRef by filename,
@@ -532,7 +515,6 @@ const PropertiesPanel = ({
       setPrevCode(prev);
       setCurrentCode(next);
       setEditBuffer(next);
-<<<<<<< HEAD
       // Seed a fresh unified-history baseline so Ctrl+Z in the code panel
       // never undoes past the point where this code was generated.
       // We don't have diagram state here (it lives in UMLEditor), so seed
@@ -540,12 +522,6 @@ const PropertiesPanel = ({
       // before mutating, so the baseline is always the generated state.
       codeHistoryRef.current      = [];
       codeHistoryIndexRef.current = -1;
-=======
-      // Seed a fresh code-history baseline so Ctrl+Z in the code panel
-      // never undoes past the point where this code was generated.
-      codeHistoryRef.current      = [next];
-      codeHistoryIndexRef.current = 0;
->>>>>>> 2c5ca15c83dfcb6a0a7a008d05de801217b76155
       setSyncStatus(null);
       setSyncError('');
       // Do NOT reset showDiff — if it was on, keep it on so the user
@@ -563,15 +539,9 @@ const PropertiesPanel = ({
       setPrevCode(prev);
       setCurrentCode(next);
       setEditBuffer(next);
-<<<<<<< HEAD
       // Reset unified history for the newly active tab too.
       codeHistoryRef.current      = [];
       codeHistoryIndexRef.current = -1;
-=======
-      // Reset code history for the newly active tab too.
-      codeHistoryRef.current      = [next];
-      codeHistoryIndexRef.current = 0;
->>>>>>> 2c5ca15c83dfcb6a0a7a008d05de801217b76155
       setSyncStatus(null);
       setSyncError('');
       // showDiff stays exactly as it was — switching tabs never toggles it.
@@ -579,7 +549,6 @@ const PropertiesPanel = ({
   }, [selectedFileIndex, generatedFiles, generatedCode]);
 
   /**
-<<<<<<< HEAD
    * pushUnifiedHistory(code, elements, connections)
    * ------------------------------------------------
    * Saves a PAIRED snapshot { code, elements, connections } onto the
@@ -601,26 +570,12 @@ const PropertiesPanel = ({
       elements: JSON.parse(JSON.stringify(els)),
       connections: JSON.parse(JSON.stringify(conns)),
     }];
-=======
-   * pushCodeHistory(code)
-   * Saves a code string onto the code-side undo stack.
-   * Any "future" entries (from prior undos) are discarded — same
-   * semantics as the diagram useHistory hook.
-   * Capped at 100 entries to avoid unbounded memory growth.
-   * Declared before applyCodeToDiagram and handleCodeChange so those
-   * useCallbacks can safely reference it without a TDZ error.
-   */
-  const pushCodeHistory = useCallback((code) => {
-    const trimmed = codeHistoryRef.current.slice(0, codeHistoryIndexRef.current + 1);
-    const next = [...trimmed, code];
->>>>>>> 2c5ca15c83dfcb6a0a7a008d05de801217b76155
     codeHistoryRef.current = next.length > 100 ? next.slice(next.length - 100) : next;
     codeHistoryIndexRef.current = codeHistoryRef.current.length - 1;
   }, []);
 
   /**
    * applyCodeToDiagram(code, onSuccess, options)
-<<<<<<< HEAD
    * ---------------------------------------------
    * Parses the code and pushes the result to UMLEditor via onCodeEdit.
    *
@@ -635,19 +590,6 @@ const PropertiesPanel = ({
    * the already-correct elements+connections directly (no re-parse needed
    * for diagram state; the snapshot IS the truth). UMLEditor skips its own
    * saveToHistory so the canvas undo stack stays clean.
-=======
-   * Parses the code and pushes the result to UMLEditor.
-   * Called automatically by the debounced live-sync and by the code-side
-   * undo/redo handler. UMLEditor saves the current diagram to history
-   * BEFORE applying, so Ctrl+Z on the canvas restores the pre-edit state.
-   *
-   * FIX (undo-stack desync): When called from the code-side undo/redo handler
-   * (options.fromCodeUndo = true), we forward that flag to onCodeEdit so
-   * UMLEditor knows to skip saveToHistory entirely. This prevents the diagram
-   * undo stack from accumulating spurious entries every time the user presses
-   * Ctrl+Z inside the code textarea, which previously caused connections to
-   * reappear in the wrong place after an undo-then-redo cycle.
->>>>>>> 2c5ca15c83dfcb6a0a7a008d05de801217b76155
    */
   const applyCodeToDiagram = useCallback((code, onSuccess, options = {}) => {
     if (!code.trim()) return;
@@ -659,7 +601,6 @@ const PropertiesPanel = ({
         if (selectedDiagram === 'sequence') {
           result = CodeToUMLConverter.convertCodeToUMLSequence(code, language || 'Java');
         } else if (selectedDiagram === 'usecase') {
-<<<<<<< HEAD
           // FIX (Bug 2): Do NOT pass elementsRef as seed to the converter.
           // When elementsRef is passed as a seed, the converter can re-match
           // a deleted relation back to a still-live canvas node and re-add it.
@@ -667,25 +608,15 @@ const PropertiesPanel = ({
           // the position-preserving merge in onCodeEdit handles ID/position
           // reuse without re-injecting deleted relations.
           result = CodeToUMLConverter.convertCodeToUMLUseCase(code, language || 'Java');
-=======
-          // Pass elementsRef.current (always fresh, never stale) so the converter
-          // can reuse existing actor/use-case IDs and canvas positions.
-          // Using a ref instead of the `elements` closure variable prevents the
-          // stale-closure feedback loop that previously caused phantom nodes.
-          result = CodeToUMLConverter.convertCodeToUMLUseCase(code, language || 'Java', elementsRef.current);
->>>>>>> 2c5ca15c83dfcb6a0a7a008d05de801217b76155
         } else {
           result = CodeToUMLConverter.convertCodeToUML(code, language || 'Java');
         }
 
         if (!result.success) {
-<<<<<<< HEAD
           // FIX (Bug 3 — sequence): A failed parse must NOT wipe the diagram.
           // The old code let a parse failure silently leave the canvas in a
           // half-applied state. Now we stop here and show the error; the canvas
           // stays exactly as it was before the user started typing.
-=======
->>>>>>> 2c5ca15c83dfcb6a0a7a008d05de801217b76155
           setSyncStatus('error');
           setSyncError(result.message || 'Could not parse the edited code.');
           return;
@@ -694,20 +625,11 @@ const PropertiesPanel = ({
         onCodeEdit?.(result.elements, result.connections, {
           replaceAll: result.replaceAll,
           diagramType: selectedDiagram,
-<<<<<<< HEAD
-=======
-          // Forward the fromCodeUndo flag so UMLEditor skips diagram saveToHistory
-          // on replays — only fresh live-edits should push a new diagram snapshot.
->>>>>>> 2c5ca15c83dfcb6a0a7a008d05de801217b76155
           fromCodeUndo: options.fromCodeUndo || false,
         });
         setCurrentCode(code);
         setSyncStatus('success');
-<<<<<<< HEAD
         onSuccess?.();
-=======
-        onSuccess?.();  // push to code history only after successful parse+apply
->>>>>>> 2c5ca15c83dfcb6a0a7a008d05de801217b76155
         setTimeout(() => setSyncStatus(null), 2000);
       } catch (err) {
         setSyncStatus('error');
@@ -718,7 +640,6 @@ const PropertiesPanel = ({
 
   /**
    * handleCodeChange
-<<<<<<< HEAD
    * ----------------
    * Updates the edit buffer immediately (so the textarea feels responsive)
    * then schedules a debounced diagram re-parse 700ms after the user stops
@@ -729,22 +650,12 @@ const PropertiesPanel = ({
    * pushUnifiedHistory saves that pre-edit snapshot as the undo entry — so
    * Ctrl+Z restores BOTH the code text and the diagram to exactly what they
    * were before this keystroke batch.
-=======
-   *
-   * For CLASS and USE-CASE diagrams: updates the buffer and schedules a
-   * debounced diagram re-parse 700 ms after the user stops typing.
-   * For SEQUENCE diagrams: uses a slightly longer debounce because parsing
-   * the interaction flow is more expensive.
-   * The converter always does a full replaceAll from the current code text,
-   * so deleting a method removes its connection, adding one creates it.
->>>>>>> 2c5ca15c83dfcb6a0a7a008d05de801217b76155
    */
   const handleCodeChange = useCallback((value) => {
     setEditBuffer(value);
     setSyncStatus(null);
     setSyncError('');
 
-<<<<<<< HEAD
     // Capture pre-edit state NOW (before the parse runs) so the undo
     // entry records what existed immediately before this change batch.
     const preEditCode     = currentCodeRef.current;
@@ -763,24 +674,10 @@ const PropertiesPanel = ({
       });
     }, delay);
   }, [applyCodeToDiagram, pushUnifiedHistory, selectedDiagram]);
-=======
-    // Cancel any previously scheduled apply
-    clearTimeout(applyDebounceRef.current);
-
-    // Schedule a new apply 700ms from now for class/usecase
-    // 1000ms for sequence (more complex parse)
-    const delay = selectedDiagram === 'sequence' ? 1000 : 700;
-
-    applyDebounceRef.current = setTimeout(() => {
-      applyCodeToDiagram(value, () => pushCodeHistory(value));
-    }, delay);
-  }, [applyCodeToDiagram, pushCodeHistory, selectedDiagram]);
->>>>>>> 2c5ca15c83dfcb6a0a7a008d05de801217b76155
 
   /**
    * handleCodeKeyDown
    * -----------------
-<<<<<<< HEAD
    * Ctrl+Z  — undo: restore the previous { code, elements, connections } snapshot.
    * Ctrl+Y / Ctrl+Shift+Z — redo: same in the forward direction.
    *
@@ -792,14 +689,6 @@ const PropertiesPanel = ({
    * fromCodeUndo: true tells UMLEditor.onCodeEdit to skip its own
    * saveToHistory — the snapshot already has the right state, no need
    * to push another entry onto the canvas undo stack.
-=======
-   * Ctrl+Z  — undo: pop code history, restore text, re-parse diagram.
-   * Ctrl+Y / Ctrl+Shift+Z — redo: same in the forward direction.
-   *
-   * Both are intercepted before the browser's native textarea undo so the
-   * diagram always stays in sync with the code undo stack.
-   * All other keys fall through to normal textarea behaviour.
->>>>>>> 2c5ca15c83dfcb6a0a7a008d05de801217b76155
    */
   const handleCodeKeyDown = useCallback((e) => {
     const isUndo = (e.ctrlKey || e.metaKey) && e.key === 'z' && !e.shiftKey;
@@ -808,7 +697,6 @@ const PropertiesPanel = ({
     if (isUndo) {
       e.preventDefault();
       clearTimeout(applyDebounceRef.current);
-<<<<<<< HEAD
       if (codeHistoryIndexRef.current >= 0) {
         const snapshot = codeHistoryRef.current[codeHistoryIndexRef.current];
         codeHistoryIndexRef.current--;
@@ -824,13 +712,6 @@ const PropertiesPanel = ({
         });
         setSyncStatus(null);
         setSyncError('');
-=======
-      if (codeHistoryIndexRef.current > 0) {
-        codeHistoryIndexRef.current--;
-        const prev = codeHistoryRef.current[codeHistoryIndexRef.current];
-        setEditBuffer(prev);
-        applyCodeToDiagram(prev, undefined, { fromCodeUndo: true });
->>>>>>> 2c5ca15c83dfcb6a0a7a008d05de801217b76155
       }
       return;
     }
@@ -840,7 +721,6 @@ const PropertiesPanel = ({
       clearTimeout(applyDebounceRef.current);
       if (codeHistoryIndexRef.current < codeHistoryRef.current.length - 1) {
         codeHistoryIndexRef.current++;
-<<<<<<< HEAD
         const snapshot = codeHistoryRef.current[codeHistoryIndexRef.current];
         // For redo we want the state AFTER this snapshot's pre-edit, which
         // means we need to re-parse the next code version. Capture the
@@ -871,15 +751,6 @@ const PropertiesPanel = ({
       return;
     }
   }, [applyCodeToDiagram, onCodeEdit, selectedDiagram, editBuffer]);
-=======
-        const next = codeHistoryRef.current[codeHistoryIndexRef.current];
-        setEditBuffer(next);
-        applyCodeToDiagram(next, undefined, { fromCodeUndo: true });
-      }
-      return;
-    }
-  }, [applyCodeToDiagram, selectedDiagram]);
->>>>>>> 2c5ca15c83dfcb6a0a7a008d05de801217b76155
 
   /**
    * Scroll-sync: when the textarea scrolls, mirror to the highlight layer
@@ -1792,8 +1663,4 @@ const ConnectionProperties = ({ connection, onUpdate, onDelete, saveToHistory, e
   );
 };
 
-<<<<<<< HEAD
 export default PropertiesPanel;
-=======
-export default PropertiesPanel;
->>>>>>> 2c5ca15c83dfcb6a0a7a008d05de801217b76155
