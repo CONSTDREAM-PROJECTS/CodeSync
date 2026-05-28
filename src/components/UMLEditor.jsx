@@ -2242,6 +2242,7 @@ const UMLEditor = ({ currentUser, onLoginSuccess, onLogout }) => {
           }
 
           // ── SEQUENCE DIAGRAM LIVE SYNC ─────────────────────────────────
+<<<<<<< HEAD
           // BUG 3 FIX: One bad edit wipes all lifelines; undo never recovers.
           //
           // ROOT CAUSE (part 1 — wipe): The sequence converter is the strictest
@@ -2279,6 +2280,17 @@ const UMLEditor = ({ currentUser, onLoginSuccess, onLogout }) => {
                 width:  existing.width,
                 height: existing.height,
               };
+=======
+          if (options.replaceAll && selectedDiagram === 'sequence') {
+            const currentByName = new Map(currentEls.map(el => [normElementName(el.name), el]));
+            const idMap = new Map();
+
+            mergedElements = importedElements.map(imported => {
+              const existing = currentByName.get(normElementName(imported.name));
+              const finalElement = mergeWithExistingElement(imported, existing, {
+                importedIsAuthoritative: true,
+              });
+>>>>>>> 2c5ca15c83dfcb6a0a7a008d05de801217b76155
               idMap.set(imported.id, finalElement.id);
               return finalElement;
             });
@@ -2296,6 +2308,7 @@ const UMLEditor = ({ currentUser, onLoginSuccess, onLogout }) => {
           }
 
           // ── CLASS DIAGRAM LIVE SYNC ────────────────────────────────────
+<<<<<<< HEAD
           // BUG 1 FIX: Attributes duplicated / added back on undo.
           //
           // ROOT CAUSE: The old `importedHasDetails` check would fall back
@@ -2308,10 +2321,13 @@ const UMLEditor = ({ currentUser, onLoginSuccess, onLogout }) => {
           // FIX: Code is ALWAYS authoritative for content (attributes, methods,
           // stereotype, type). Canvas only contributes POSITION (x, y, w, h)
           // and ID stability. There is no fallback to canvas attrs.
+=======
+>>>>>>> 2c5ca15c83dfcb6a0a7a008d05de801217b76155
           if (options.replaceAll && selectedDiagram === 'class') {
             const norm = (s) => (s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
             const currentByName = new Map(currentEls.map(el => [norm(el.name), el]));
             const idMap = new Map();
+<<<<<<< HEAD
 
             // Rename detection: if exactly one concrete class disappeared and
             // one new one appeared, treat them as the same class renamed.
@@ -2324,6 +2340,22 @@ const UMLEditor = ({ currentUser, onLoginSuccess, onLogout }) => {
             const renamedByImportedId = new Map();
             if (unmatchedCurrent.length === 1 && unmatchedImported.length === 1) {
               renamedByImportedId.set(unmatchedImported[0].id, unmatchedCurrent[0]);
+=======
+            const isConcreteClass = (el) =>
+              ['class', 'interface', 'abstract', 'enum'].includes(el?.type) && !el?.isExternal;
+            const importedNames = new Set(importedElements.map(el => norm(el.name)));
+            const currentNames = new Set(currentEls.map(el => norm(el.name)));
+            const unmatchedCurrentConcrete = currentEls.filter(el =>
+              isConcreteClass(el) && !importedNames.has(norm(el.name))
+            );
+            const unmatchedImportedConcrete = importedElements.filter(el =>
+              isConcreteClass(el) && !currentNames.has(norm(el.name))
+            );
+            const renamedByImportedId = new Map();
+
+            if (unmatchedCurrentConcrete.length === 1 && unmatchedImportedConcrete.length === 1) {
+              renamedByImportedId.set(unmatchedImportedConcrete[0].id, unmatchedCurrentConcrete[0]);
+>>>>>>> 2c5ca15c83dfcb6a0a7a008d05de801217b76155
             }
 
             mergedElements = importedElements.map(imported => {
@@ -2333,6 +2365,7 @@ const UMLEditor = ({ currentUser, onLoginSuccess, onLogout }) => {
                 return imported;
               }
 
+<<<<<<< HEAD
               // ── External placeholder guard ────────────────────────────────
               // When the code panel shows only ONE file (e.g. Dog.java), the
               // converter cannot see classes defined in other files. It creates
@@ -2370,14 +2403,50 @@ const UMLEditor = ({ currentUser, onLoginSuccess, onLogout }) => {
                 width:  existing.width,
                 height: existing.height,
               };
+=======
+              const importedHasDetails =
+                (imported.attributes?.length || 0) > 0 ||
+                (imported.methods?.length || 0) > 0 ||
+                !imported.isExternal;
+              const existingHasDetails =
+                (existing.attributes?.length || 0) > 0 ||
+                (existing.methods?.length || 0) > 0;
+
+              const finalElement = {
+                ...imported,
+                id: existing.id,
+                x: existing.x,
+                y: existing.y,
+                width: existing.width,
+                height: existing.height,
+                attributes: importedHasDetails ? (imported.attributes || []) : (existing.attributes || []),
+                methods: importedHasDetails ? (imported.methods || []) : (existing.methods || []),
+                stereotype: importedHasDetails
+                  ? (imported.stereotype || existing.stereotype || '')
+                  : (existingHasDetails && existing.stereotype === 'external'
+                    ? ''
+                    : (existing.stereotype || imported.stereotype || '')),
+                isExternal: importedHasDetails ? (imported.isExternal || false) : false,
+              };
+
+              if (!importedHasDetails && existingHasDetails) {
+                finalElement.type = existing.type || imported.type;
+              }
+
+>>>>>>> 2c5ca15c83dfcb6a0a7a008d05de801217b76155
               idMap.set(imported.id, finalElement.id);
               return finalElement;
             });
 
             mergedConnections = importedConnections.map(conn => ({
               ...conn,
+<<<<<<< HEAD
               from:   idMap.get(conn.from)   || conn.from,
               to:     idMap.get(conn.to)     || conn.to,
+=======
+              from: idMap.get(conn.from) || conn.from,
+              to: idMap.get(conn.to) || conn.to,
+>>>>>>> 2c5ca15c83dfcb6a0a7a008d05de801217b76155
               source: idMap.get(conn.source) || conn.source,
               target: idMap.get(conn.target) || conn.target,
             }));
@@ -2393,6 +2462,7 @@ const UMLEditor = ({ currentUser, onLoginSuccess, onLogout }) => {
             return;
           }
 
+<<<<<<< HEAD
           // ── USE-CASE LIVE SYNC ─────────────────────────────────────────
           // BUG 2 FIX: Deleted relation comes back after editing code.
           //
@@ -2428,11 +2498,48 @@ const UMLEditor = ({ currentUser, onLoginSuccess, onLogout }) => {
                 width:  existing.width,
                 height: existing.height,
               };
+=======
+          // ── USE-CASE LIVE SYNC: position-preserving merge ──────────────────
+          // For use-case diagrams with replaceAll, the converter re-parses the
+          // entire code file and returns the correct set of elements+connections.
+          // Instead of blindly replacing everything, we:
+          //   1. Keep ALL existing canvas elements exactly where they are (positions
+          //      preserved — actors, use cases, system boundaries).
+          //   2. Add any NEW elements the code introduced (new actors/use cases).
+          //   3. Replace connections entirely with what the code says — this is the
+          //      surgical part: a deleted method removes its arrow, an added method
+          //      adds its arrow, nothing else changes.
+          // This makes the bidirectional sync behave exactly as expected:
+          // delete a method → only that connection disappears.
+          // Ctrl+Z in code → connection reappears. Diagram layout never moves.
+          if (options.replaceAll && selectedDiagram === 'usecase') {
+            // Build a name→element map of what the canvas currently has
+            const norm = (s) => (s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+            const currentByName = new Map(currentEls.map(el => [norm(el.name), el]));
+
+            const idMap = new Map();
+
+            // For each element the converter produced, reuse the existing canvas
+            // node if one with the same name exists (keeps id + position), otherwise
+            // accept the new node (it's genuinely new). Track imported->final IDs
+            // so regenerated connections still point at the preserved canvas nodes.
+            mergedElements = importedElements.map(imported => {
+              const existing = currentByName.get(norm(imported.name));
+              const finalElement = mergeWithExistingElement(imported, existing, {
+                importedIsAuthoritative: true,
+              });
+>>>>>>> 2c5ca15c83dfcb6a0a7a008d05de801217b76155
               idMap.set(imported.id, finalElement.id);
               return finalElement;
             });
 
+<<<<<<< HEAD
             // Connections come entirely from the code parse — no canvas bleed-through.
+=======
+            // Connections come entirely from the code parse, but their endpoints
+            // may still reference freshly-parsed IDs. Rewrite them to the final
+            // preserved element IDs so use-case live sync stays bidirectional.
+>>>>>>> 2c5ca15c83dfcb6a0a7a008d05de801217b76155
             mergedConnections = remapConnections(importedConnections, idMap);
 
             if (options.fromCodeUndo) {
@@ -2504,4 +2611,8 @@ const UMLEditor = ({ currentUser, onLoginSuccess, onLogout }) => {
   );
 };
 
+<<<<<<< HEAD
 export default UMLEditor;
+=======
+export default UMLEditor;
+>>>>>>> 2c5ca15c83dfcb6a0a7a008d05de801217b76155
