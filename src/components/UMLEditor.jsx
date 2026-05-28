@@ -57,6 +57,7 @@
 
 import React, { useState, useRef, useEffect } from 'react';
 import CodeGenerator from '../services/codeGenerator';
+import CodeToUMLConverter from '../services/codeToUMLConverter';
 import TokenizationService from '../services/TokenizationService';
 import ValidationService from '../services/ValidationService';
 import DiagramService from '../services/diagramService';
@@ -978,6 +979,33 @@ const UMLEditor = ({ currentUser, onLoginSuccess, onLogout }) => {
   const handleImportCode = (importedElements, importedConnections, options = {}) => {
     let mergedElements;
     let mergedConnections;
+
+    // ── Round-trip consistency check ─────────────────────────────────────
+    // When replaceAll is true AND there is an existing diagram on the canvas,
+    // the user performed a round-trip (Model → Code → Model). We measure how
+    // many elements survived intact using the BMCSA Consistency Rate formula:
+    //   Consistency Rate = (Matching Elements / Total Elements) × 100%
+    // Target: ≥ 95%. Error Rate = 100% − Consistency Rate (target: < 5%).
+    const isRoundTrip = options.replaceAll && elements.length > 0;
+    if (isRoundTrip) {
+      const result = CodeToUMLConverter.computeConsistencyRate(
+        elements, connections, importedElements, importedConnections
+      );
+      const rateStr  = result.consistencyRate.toFixed(2);
+      const errStr   = result.errorRate.toFixed(2);
+      const status   = result.passed ? '✔ PASSED (≥ 95%)' : '✘ BELOW THRESHOLD (< 95%)';
+      const summary  = `Round-trip Consistency: ${rateStr}% — Error Rate: ${errStr}% — ${status}`;
+      // Surface via toast so the user sees it immediately
+      showToast(summary, result.passed ? 'success' : 'warning');
+      // Also log the full breakdown for developers / panelist demo
+      console.group('[BMCSA] Bidirectional Consistency Measurement');
+      console.log(`Consistency Rate : ${rateStr}%`);
+      console.log(`Error Rate       : ${errStr}%`);
+      console.log(`Matching / Total : ${result.matchingElements} / ${result.totalElements}`);
+      console.log('Breakdown        :', result.breakdown);
+      console.log(`Result           : ${status}`);
+      console.groupEnd();
+    }
 
     // replaceAll: true is set by CodeToUMLConverter when importing fresh code
     // so stale placeholder elements don't remain alongside newly-imported ones.

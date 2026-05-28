@@ -207,27 +207,20 @@ class CodeGenerator {
       files.push({ filename: 'SequenceFlow.md',
                    content: this.generateSequenceDocumentation(els, conns) });
 
-      // FIX 2+7: emit one file per lifeline class instead of one combined
-      // SequenceHandler.java — Java requires one public class per file.
-      // Also emit the Runner class as its own file.
+      // One combined file for all languages — consistent with Python and JS behaviour.
+      // For Java we strip the redundant "public" modifier from non-entry classes so
+      // all classes can coexist in a single .java file (only one public class per file
+      // is a Java restriction, not a one-class-per-file requirement).
       if (language === 'Java') {
-        // Re-run the generator to get the full text, then split on class boundaries
         const fullCode = this.generateSequenceCode(els, conns, language);
-        // Split on lines starting with "public class " or "// ── Runner"
-        const classBlocks = fullCode.split(/(?=public class \w)/);
-        // The first block is the package+javadoc header — attach it to each class
-        const header = 'package com.example.sequences;\n\n';
-        classBlocks.forEach(block => {
-          const classMatch = block.match(/public class (\w+)/);
-          if (!classMatch) return;
-          const className = classMatch[1];
-          files.push({
-            filename: `${className}.java`,
-            content:  header + block.trim() + "\n"
-          });
+        // Keep SequenceRunner public; demote all other "public class" to package-private
+        const combined = fullCode.replace(/public class (\w+)/g, (match, className) => {
+          if (className === 'SequenceRunner') return match;
+          return `class ${className}`;
         });
+        files.push({ filename: 'SequenceHandler.java', content: combined });
       } else {
-        // Python and JS: one combined file is idiomatic (modules, not one-class-per-file)
+        // Python and JS: one combined file is idiomatic
         files.push({ filename: this.getFileName('sequence_handler', language),
                      content: this.generateSequenceCode(els, conns, language) });
       }
