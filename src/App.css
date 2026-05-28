@@ -1,0 +1,314 @@
+.App {
+  min-height: 100vh;
+}
+
+:root {
+  --bg-0:    #1f1f1f;   /* page background */
+  --panel:   #3e3e3e;   /* side panels */
+  --panel-2: #2f2f2f;   /* darker panels / toolbar */
+  --muted:   #d9dccc;   /* pale input background */
+  --accent:  #9c9b7f;   /* primary button / tan */
+  --accent-2:#a8d8ff;   /* small highlight / info colour */
+  --text:    #e6e6e6;
+}
+
+body, .App {
+  background: var(--bg-0);
+  color: var(--text);
+}
+
+/* ── Top navigation bar ─────────────────────────────────── */
+.top-nav {
+  background: linear-gradient(180deg, var(--panel-2), var(--panel));
+  border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+  padding-top: 12px;
+  padding-bottom: 12px;
+  height: 64px;
+}
+
+/* ── Primary action button (used in DiagramToolbar, ToolPalette) */
+.btn-primary {
+  background: var(--accent);
+  color: #222;
+  padding-left: 1rem;
+  padding-right: 1rem;
+  border-radius: 999px;
+  padding-top: 0.4rem;
+  padding-bottom: 0.4rem;
+  border: none;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-weight: 500;
+  font-size: 0.875rem;
+  transition: all 250ms cubic-bezier(0.4, 0, 0.2, 1);
+  white-space: nowrap;
+  box-shadow: 0 2px 8px rgba(156, 155, 127, 0.15);
+}
+.btn-primary:hover {
+  filter: brightness(0.92);
+  transform: translateY(-2px);
+  box-shadow: 0 6px 16px rgba(156, 155, 127, 0.25);
+}
+.btn-primary:active {
+  filter: brightness(0.85);
+  transform: translateY(0);
+  box-shadow: 0 2px 4px rgba(156, 155, 127, 0.15);
+}
+
+/* ── Muted secondary button ─────────────────────────────── */
+.btn-muted {
+  background: #404040;
+  color: var(--muted);
+  padding-left: 0.75rem;
+  padding-right: 0.75rem;
+  border-radius: 8px;
+  border: none;
+  cursor: pointer;
+  transition: all 200ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+.btn-muted:hover {
+  background: #4a4a4a;
+  transform: translateY(-1px);
+}
+.btn-muted:active {
+  transform: translateY(0);
+}
+
+/* ── Animations ─────────────────────────────────────────── */
+@keyframes modalBackdropIn {
+  from {
+    opacity: 0;
+    backdrop-filter: blur(0px);
+  }
+  to {
+    opacity: 1;
+    backdrop-filter: blur(12px);
+  }
+}
+
+@keyframes modalBackdropOut {
+  from {
+    opacity: 1;
+    backdrop-filter: blur(12px);
+  }
+  to {
+    opacity: 0;
+    backdrop-filter: blur(0px);
+  }
+}
+
+@keyframes modalScaleIn {
+  from {
+    opacity: 0;
+    transform: translateY(40px) scale(0.9) rotate(-2deg);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1) rotate(0deg);
+  }
+}
+
+@keyframes modalScaleOut {
+  from {
+    opacity: 1;
+    transform: translateY(0) scale(1) rotate(0deg);
+  }
+  to {
+    opacity: 0;
+    transform: translateY(40px) scale(0.9) rotate(-2deg);
+  }
+}
+
+@keyframes slideUp {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes slideDown {
+  from {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  to {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes fadeOut {
+  from { opacity: 1; }
+  to { opacity: 0; }
+}
+
+/* ── Modal overlay (used in CodeImportModal, LoginModal) ── */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.65);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 9999;
+  /* Prevent scroll on body while modal is open */
+  overflow: hidden;
+}
+
+.modal-overlay.in {
+  animation: modalBackdropIn 300ms ease-out forwards;
+}
+
+.modal-overlay.out {
+  animation: modalBackdropOut 300ms ease-in forwards;
+}
+
+/* ── Login card ─────────────────────────────────────────── */
+.login-card {
+  width: 420px;
+  background: linear-gradient(180deg, #3f3f3f, #343434);
+  border-radius: 28px;
+  padding: 44px 36px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.6), 0 0 40px rgba(156, 155, 127, 0.15);
+  text-align: center;
+}
+
+.login-card.in {
+  animation: modalScaleIn 400ms cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+}
+
+.login-card.out {
+  animation: modalScaleOut 300ms cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+}
+.login-logo {
+  font-size: 28px;
+  color: var(--muted);
+  font-weight: 600;
+  margin-bottom: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.login-logo img {
+  height: 64px;
+  width: auto;
+  margin: 0 auto 8px auto;
+  display: block;
+}
+.login-form {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  align-items: center;
+}
+.login-input {
+  width: 320px;
+  height: 46px;
+  border-radius: 22px;
+  background: var(--muted);
+  border: 2px solid transparent;
+  padding: 0 18px;
+  outline: none;
+  color: #222;
+  font-size: 14px;
+  transition: all 250ms cubic-bezier(0.4, 0, 0.2, 1);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+.login-input:focus {
+  transform: translateY(-2px);
+  box-shadow: 0 0 0 2px var(--accent), 0 8px 20px rgba(156, 155, 127, 0.2);
+  border-color: var(--accent);
+}
+.login-help {
+  color: rgba(255, 255, 255, 0.6);
+  font-size: 14px;
+  margin-top: 6px;
+  cursor: pointer;
+}
+.login-help:hover { color: rgba(255, 255, 255, 0.9); }
+.login-btn {
+  background: var(--accent);
+  color: #222;
+  border: none;
+  border-radius: 18px;
+  padding: 8px 36px;
+  margin-top: 6px;
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 14px;
+  width: 320px;
+  transition: all 250ms cubic-bezier(0.4, 0, 0.2, 1);
+  box-shadow: 0 4px 12px rgba(156, 155, 127, 0.25);
+  position: relative;
+  overflow: hidden;
+}
+.login-btn:hover {
+  filter: brightness(0.92);
+  transform: translateY(-2px);
+  box-shadow: 0 8px 24px rgba(156, 155, 127, 0.35);
+}
+.login-btn:active {
+  filter: brightness(0.85);
+  transform: translateY(0);
+  box-shadow: 0 2px 6px rgba(156, 155, 127, 0.2);
+}
+.login-or {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  color: rgba(255, 255, 255, 0.6);
+  font-size: 14px;
+  margin-top: 8px;
+  width: 100%;
+}
+.login-or span {
+  flex: 1;
+  height: 1px;
+  background: rgba(255, 255, 255, 0.06);
+}
+.login-socials {
+  display: flex;
+  gap: 18px;
+  margin-top: 8px;
+}
+.social-btn {
+  width: 44px;
+  height: 44px;
+  border-radius: 22px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  color: var(--text);
+  transition: all 250ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+.social-btn:hover {
+  background: rgba(255, 255, 255, 0.12);
+  transform: translateY(-2px) scale(1.05);
+  box-shadow: 0 4px 12px rgba(156, 155, 127, 0.2);
+}
+.social-btn:active {
+  transform: translateY(0) scale(0.98);
+}
+.create-account {
+  color: rgba(255, 255, 255, 0.7);
+  margin-top: 10px;
+  font-size: 13px;
+}
+
+/* ── Editor layout helpers ──────────────────────────────── */
+main        { background: transparent; }
+.h-screen   { background: var(--bg-0); }
