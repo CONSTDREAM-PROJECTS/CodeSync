@@ -1076,34 +1076,65 @@ const UMLEditor = ({ currentUser, onLoginSuccess, onLogout }) => {
 
   /**
    * handleExportPNG()
-   * Fix #6: Renders the SVG into an off-screen <canvas> via an Image element,
-   * then exports that canvas as a PNG. No html2canvas dependency needed.
+   * Exports the ENTIRE diagram — not just the visible viewport — by computing
+   * the real bounding box from all elements, then re-serializing the SVG with
+   * a corrected viewBox so off-screen content is included.
    */
   const handleExportPNG = () => {
     const svgEl = canvasRef.current;
     if (!svgEl) return;
+
+    if (elements.length === 0) {
+      showToast('Nothing to export — add some elements first', 'error');
+      return;
+    }
+
+    // 1. Compute the true bounding box of every element in diagram coordinates
+    const PADDING = 60;
+    const minX = Math.min(...elements.map(el => el.x)) - PADDING;
+    const minY = Math.min(...elements.map(el => el.y)) - PADDING;
+    const maxX = Math.max(...elements.map(el => el.x + (el.width  || 200))) + PADDING;
+    const maxY = Math.max(...elements.map(el => el.y + (el.height || 150))) + PADDING;
+    const diagW = maxX - minX;
+    const diagH = maxY - minY;
+
+    // 2. Clone the SVG and patch its viewBox so the full diagram is visible,
+    //    then update the inner <g> transform to remove pan/zoom offsets — we
+    //    want raw diagram coordinates, not the current pan/zoom state.
+    const clone = svgEl.cloneNode(true);
+    clone.setAttribute('width',   diagW);
+    clone.setAttribute('height',  diagH);
+    clone.setAttribute('viewBox', `${minX} ${minY} ${diagW} ${diagH}`);
+
+    // Find the main transform group and reset it to identity (no pan, no zoom)
+    const mainG = clone.querySelector('g[transform]');
+    if (mainG) mainG.setAttribute('transform', 'translate(0,0) scale(1)');
+
+    // 3. Inline all <defs> marker elements (already inside the SVG, nothing extra needed)
+
     const serializer = new XMLSerializer();
-    const svgStr = serializer.serializeToString(svgEl);
+    const svgStr = serializer.serializeToString(clone);
     const svgBlob = new Blob([svgStr], { type: 'image/svg+xml;charset=utf-8' });
     const url = URL.createObjectURL(svgBlob);
+
     const img = new Image();
     img.onload = () => {
-      const canvas = document.createElement('canvas');
       const scale = 2; // 2× for retina-quality output
-      canvas.width  = svgEl.clientWidth  * scale;
-      canvas.height = svgEl.clientHeight * scale;
+      const canvas = document.createElement('canvas');
+      canvas.width  = diagW * scale;
+      canvas.height = diagH * scale;
       const ctx = canvas.getContext('2d');
       ctx.fillStyle = '#1e1e1e';
       ctx.fillRect(0, 0, canvas.width, canvas.height);
       ctx.scale(scale, scale);
-      ctx.drawImage(img, 0, 0);
+      ctx.drawImage(img, 0, 0, diagW, diagH);
       URL.revokeObjectURL(url);
       const pngUrl = canvas.toDataURL('image/png');
       const a = document.createElement('a');
       a.href = pngUrl;
       a.download = `${selectedDiagram}-diagram.png`;
       a.click();
-      showToast('Diagram exported as PNG', 'success');
+      showToast('Full diagram exported as PNG', 'success');
     };
     img.onerror = () => {
       URL.revokeObjectURL(url);
@@ -1114,33 +1145,54 @@ const UMLEditor = ({ currentUser, onLoginSuccess, onLogout }) => {
 
   /**
    * handleExportJPEG()
-   * Renders the SVG into an off-screen <canvas> and exports as JPEG.
+   * Exports the ENTIRE diagram as JPEG using the same full-bounds approach as PNG.
    */
   const handleExportJPEG = () => {
     const svgEl = canvasRef.current;
     if (!svgEl) return;
+
+    if (elements.length === 0) {
+      showToast('Nothing to export — add some elements first', 'error');
+      return;
+    }
+
+    const PADDING = 60;
+    const minX = Math.min(...elements.map(el => el.x)) - PADDING;
+    const minY = Math.min(...elements.map(el => el.y)) - PADDING;
+    const maxX = Math.max(...elements.map(el => el.x + (el.width  || 200))) + PADDING;
+    const maxY = Math.max(...elements.map(el => el.y + (el.height || 150))) + PADDING;
+    const diagW = maxX - minX;
+    const diagH = maxY - minY;
+
+    const clone = svgEl.cloneNode(true);
+    clone.setAttribute('width',   diagW);
+    clone.setAttribute('height',  diagH);
+    clone.setAttribute('viewBox', `${minX} ${minY} ${diagW} ${diagH}`);
+    const mainG = clone.querySelector('g[transform]');
+    if (mainG) mainG.setAttribute('transform', 'translate(0,0) scale(1)');
+
     const serializer = new XMLSerializer();
-    const svgStr = serializer.serializeToString(svgEl);
+    const svgStr = serializer.serializeToString(clone);
     const svgBlob = new Blob([svgStr], { type: 'image/svg+xml;charset=utf-8' });
     const url = URL.createObjectURL(svgBlob);
     const img = new Image();
     img.onload = () => {
-      const canvas = document.createElement('canvas');
       const scale = 2;
-      canvas.width = svgEl.clientWidth * scale;
-      canvas.height = svgEl.clientHeight * scale;
+      const canvas = document.createElement('canvas');
+      canvas.width  = diagW * scale;
+      canvas.height = diagH * scale;
       const ctx = canvas.getContext('2d');
       ctx.fillStyle = '#1e1e1e';
       ctx.fillRect(0, 0, canvas.width, canvas.height);
       ctx.scale(scale, scale);
-      ctx.drawImage(img, 0, 0);
+      ctx.drawImage(img, 0, 0, diagW, diagH);
       URL.revokeObjectURL(url);
       const jpegUrl = canvas.toDataURL('image/jpeg', 0.92);
       const a = document.createElement('a');
       a.href = jpegUrl;
       a.download = `${selectedDiagram}-diagram.jpg`;
       a.click();
-      showToast('Diagram exported as JPEG', 'success');
+      showToast('Full diagram exported as JPEG', 'success');
     };
     img.onerror = () => {
       URL.revokeObjectURL(url);
@@ -1151,48 +1203,63 @@ const UMLEditor = ({ currentUser, onLoginSuccess, onLogout }) => {
 
   /**
    * handleExportPDF()
-   * Renders the SVG to a canvas then embeds it in a PDF using raw PDF syntax.
-   * No external library needed — uses canvas.toDataURL and builds a minimal PDF.
+   * Exports the ENTIRE diagram as PDF using the same full-bounds approach as PNG/JPEG.
    */
   const handleExportPDF = () => {
     const svgEl = canvasRef.current;
     if (!svgEl) return;
+
+    if (elements.length === 0) {
+      showToast('Nothing to export — add some elements first', 'error');
+      return;
+    }
+
+    const PADDING = 60;
+    const minX = Math.min(...elements.map(el => el.x)) - PADDING;
+    const minY = Math.min(...elements.map(el => el.y)) - PADDING;
+    const maxX = Math.max(...elements.map(el => el.x + (el.width  || 200))) + PADDING;
+    const maxY = Math.max(...elements.map(el => el.y + (el.height || 150))) + PADDING;
+    const diagW = maxX - minX;
+    const diagH = maxY - minY;
+
+    const clone = svgEl.cloneNode(true);
+    clone.setAttribute('width',   diagW);
+    clone.setAttribute('height',  diagH);
+    clone.setAttribute('viewBox', `${minX} ${minY} ${diagW} ${diagH}`);
+    const mainG = clone.querySelector('g[transform]');
+    if (mainG) mainG.setAttribute('transform', 'translate(0,0) scale(1)');
+
     const serializer = new XMLSerializer();
-    const svgStr = serializer.serializeToString(svgEl);
+    const svgStr = serializer.serializeToString(clone);
     const svgBlob = new Blob([svgStr], { type: 'image/svg+xml;charset=utf-8' });
     const url = URL.createObjectURL(svgBlob);
     const img = new Image();
     img.onload = () => {
-      // Render to canvas at 2× for quality
       const scale = 2;
-      const w = svgEl.clientWidth;
-      const h = svgEl.clientHeight;
+      const w = diagW;
+      const h = diagH;
       const canvas = document.createElement('canvas');
-      canvas.width = w * scale;
+      canvas.width  = w * scale;
       canvas.height = h * scale;
       const ctx = canvas.getContext('2d');
       ctx.fillStyle = '#1e1e1e';
       ctx.fillRect(0, 0, canvas.width, canvas.height);
       ctx.scale(scale, scale);
-      ctx.drawImage(img, 0, 0);
+      ctx.drawImage(img, 0, 0, w, h);
       URL.revokeObjectURL(url);
 
-      // Convert to JPEG data URL (smaller than PNG for PDF embedding)
       const jpegDataUrl = canvas.toDataURL('image/jpeg', 0.92);
       const base64 = jpegDataUrl.split(',')[1];
 
-      // PDF page size in points at 72dpi (A4 landscape if needed)
       const DPI = 72;
-      const pdfW = Math.round(w * DPI / 96);  // screen px → pdf points (96dpi screen)
+      const pdfW = Math.round(w * DPI / 96);
       const pdfH = Math.round(h * DPI / 96);
 
-      // Build minimal single-page PDF with embedded JPEG
       const imgBytes = atob(base64);
       const imgLen = imgBytes.length;
       const imgArr = new Uint8Array(imgLen);
       for (let i = 0; i < imgLen; i++) imgArr[i] = imgBytes.charCodeAt(i);
 
-      // PDF object offsets
       const lines = [];
       const offsets = [];
       const push = (str) => lines.push(str);
@@ -1200,25 +1267,21 @@ const UMLEditor = ({ currentUser, onLoginSuccess, onLogout }) => {
       push('%PDF-1.4');
       push('%\xFF\xFF\xFF\xFF');
 
-      // Object 1 — Catalog
       offsets[1] = lines.join('\n').length + 1;
       push('1 0 obj');
       push('<< /Type /Catalog /Pages 2 0 R >>');
       push('endobj');
 
-      // Object 2 — Pages
       offsets[2] = lines.join('\n').length + 1;
       push('2 0 obj');
       push(`<< /Type /Pages /Kids [3 0 R] /Count 1 >>`);
       push('endobj');
 
-      // Object 3 — Page
       offsets[3] = lines.join('\n').length + 1;
       push('3 0 obj');
       push(`<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${pdfW} ${pdfH}] /Contents 4 0 R /Resources << /XObject << /Im1 5 0 R >> >> >>`);
       push('endobj');
 
-      // Object 4 — Page content stream (draw image)
       const contentStr = `q ${pdfW} 0 0 ${pdfH} 0 0 cm /Im1 Do Q`;
       offsets[4] = lines.join('\n').length + 1;
       push('4 0 obj');
@@ -1228,20 +1291,14 @@ const UMLEditor = ({ currentUser, onLoginSuccess, onLogout }) => {
       push('endstream');
       push('endobj');
 
-      // Build the PDF blob with the image as binary
       const headerText = lines.join('\n') + '\n';
       const headerBytes = new TextEncoder().encode(headerText);
 
-      // Object 5 header text
       const obj5Header = `5 0 obj\n<< /Type /XObject /Subtype /Image /Width ${w * scale} /Height ${h * scale} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length ${imgLen} >>\nstream\n`;
       const obj5HeaderBytes = new TextEncoder().encode(obj5Header);
       const obj5Footer = new TextEncoder().encode('\nendstream\nendobj\n');
 
-      // Calculate offset for object 5
-      const obj5Offset = headerBytes.length + obj5HeaderBytes.length - 1; // approximate
       offsets[5] = headerBytes.length;
-
-      // xref table
       const xrefOffset = headerBytes.length + obj5HeaderBytes.length + imgLen + obj5Footer.length;
       const xrefLines = ['xref', `0 6`, '0000000000 65535 f '];
       for (let i = 1; i <= 5; i++) {
@@ -1254,14 +1311,13 @@ const UMLEditor = ({ currentUser, onLoginSuccess, onLogout }) => {
       xrefLines.push('%%EOF');
       const xrefBytes = new TextEncoder().encode(xrefLines.join('\n'));
 
-      // Concatenate all parts
       const totalLen = headerBytes.length + obj5HeaderBytes.length + imgLen + obj5Footer.length + xrefBytes.length;
       const pdfArr = new Uint8Array(totalLen);
       let pos = 0;
-      pdfArr.set(headerBytes, pos); pos += headerBytes.length;
-      pdfArr.set(obj5HeaderBytes, pos); pos += obj5HeaderBytes.length;
-      pdfArr.set(imgArr, pos); pos += imgLen;
-      pdfArr.set(obj5Footer, pos); pos += obj5Footer.length;
+      pdfArr.set(headerBytes, pos);       pos += headerBytes.length;
+      pdfArr.set(obj5HeaderBytes, pos);   pos += obj5HeaderBytes.length;
+      pdfArr.set(imgArr, pos);            pos += imgLen;
+      pdfArr.set(obj5Footer, pos);        pos += obj5Footer.length;
       pdfArr.set(xrefBytes, pos);
 
       const pdfBlob = new Blob([pdfArr], { type: 'application/pdf' });
@@ -1271,7 +1327,7 @@ const UMLEditor = ({ currentUser, onLoginSuccess, onLogout }) => {
       a.download = `${selectedDiagram}-diagram.pdf`;
       a.click();
       setTimeout(() => URL.revokeObjectURL(pdfUrl), 1000);
-      showToast('Diagram exported as PDF', 'success');
+      showToast('Full diagram exported as PDF', 'success');
     };
     img.onerror = () => {
       URL.revokeObjectURL(url);
