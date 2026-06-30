@@ -1112,6 +1112,225 @@ const UMLEditor = ({ currentUser, onLoginSuccess, onLogout }) => {
     img.src = url;
   };
 
+  /**
+   * handleExportJPEG()
+   * Renders the SVG into an off-screen <canvas> and exports as JPEG.
+   */
+  const handleExportJPEG = () => {
+    const svgEl = canvasRef.current;
+    if (!svgEl) return;
+    const serializer = new XMLSerializer();
+    const svgStr = serializer.serializeToString(svgEl);
+    const svgBlob = new Blob([svgStr], { type: 'image/svg+xml;charset=utf-8' });
+    const url = URL.createObjectURL(svgBlob);
+    const img = new Image();
+    img.onload = () => {
+      const canvas = document.createElement('canvas');
+      const scale = 2;
+      canvas.width = svgEl.clientWidth * scale;
+      canvas.height = svgEl.clientHeight * scale;
+      const ctx = canvas.getContext('2d');
+      ctx.fillStyle = '#1e1e1e';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.scale(scale, scale);
+      ctx.drawImage(img, 0, 0);
+      URL.revokeObjectURL(url);
+      const jpegUrl = canvas.toDataURL('image/jpeg', 0.92);
+      const a = document.createElement('a');
+      a.href = jpegUrl;
+      a.download = `${selectedDiagram}-diagram.jpg`;
+      a.click();
+      showToast('Diagram exported as JPEG', 'success');
+    };
+    img.onerror = () => {
+      URL.revokeObjectURL(url);
+      showToast('JPEG export failed — try PNG instead', 'error');
+    };
+    img.src = url;
+  };
+
+  /**
+   * handleExportPDF()
+   * Renders the SVG to a canvas then embeds it in a PDF using raw PDF syntax.
+   * No external library needed — uses canvas.toDataURL and builds a minimal PDF.
+   */
+  const handleExportPDF = () => {
+    const svgEl = canvasRef.current;
+    if (!svgEl) return;
+    const serializer = new XMLSerializer();
+    const svgStr = serializer.serializeToString(svgEl);
+    const svgBlob = new Blob([svgStr], { type: 'image/svg+xml;charset=utf-8' });
+    const url = URL.createObjectURL(svgBlob);
+    const img = new Image();
+    img.onload = () => {
+      // Render to canvas at 2× for quality
+      const scale = 2;
+      const w = svgEl.clientWidth;
+      const h = svgEl.clientHeight;
+      const canvas = document.createElement('canvas');
+      canvas.width = w * scale;
+      canvas.height = h * scale;
+      const ctx = canvas.getContext('2d');
+      ctx.fillStyle = '#1e1e1e';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.scale(scale, scale);
+      ctx.drawImage(img, 0, 0);
+      URL.revokeObjectURL(url);
+
+      // Convert to JPEG data URL (smaller than PNG for PDF embedding)
+      const jpegDataUrl = canvas.toDataURL('image/jpeg', 0.92);
+      const base64 = jpegDataUrl.split(',')[1];
+
+      // PDF page size in points at 72dpi (A4 landscape if needed)
+      const DPI = 72;
+      const pdfW = Math.round(w * DPI / 96);  // screen px → pdf points (96dpi screen)
+      const pdfH = Math.round(h * DPI / 96);
+
+      // Build minimal single-page PDF with embedded JPEG
+      const imgBytes = atob(base64);
+      const imgLen = imgBytes.length;
+      const imgArr = new Uint8Array(imgLen);
+      for (let i = 0; i < imgLen; i++) imgArr[i] = imgBytes.charCodeAt(i);
+
+      // PDF object offsets
+      const lines = [];
+      const offsets = [];
+      const push = (str) => lines.push(str);
+
+      push('%PDF-1.4');
+      push('%\xFF\xFF\xFF\xFF');
+
+      // Object 1 — Catalog
+      offsets[1] = lines.join('\n').length + 1;
+      push('1 0 obj');
+      push('<< /Type /Catalog /Pages 2 0 R >>');
+      push('endobj');
+
+      // Object 2 — Pages
+      offsets[2] = lines.join('\n').length + 1;
+      push('2 0 obj');
+      push(`<< /Type /Pages /Kids [3 0 R] /Count 1 >>`);
+      push('endobj');
+
+      // Object 3 — Page
+      offsets[3] = lines.join('\n').length + 1;
+      push('3 0 obj');
+      push(`<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${pdfW} ${pdfH}] /Contents 4 0 R /Resources << /XObject << /Im1 5 0 R >> >> >>`);
+      push('endobj');
+
+      // Object 4 — Page content stream (draw image)
+      const contentStr = `q ${pdfW} 0 0 ${pdfH} 0 0 cm /Im1 Do Q`;
+      offsets[4] = lines.join('\n').length + 1;
+      push('4 0 obj');
+      push(`<< /Length ${contentStr.length} >>`);
+      push('stream');
+      push(contentStr);
+      push('endstream');
+      push('endobj');
+
+      // Build the PDF blob with the image as binary
+      const headerText = lines.join('\n') + '\n';
+      const headerBytes = new TextEncoder().encode(headerText);
+
+      // Object 5 header text
+      const obj5Header = `5 0 obj\n<< /Type /XObject /Subtype /Image /Width ${w * scale} /Height ${h * scale} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length ${imgLen} >>\nstream\n`;
+      const obj5HeaderBytes = new TextEncoder().encode(obj5Header);
+      const obj5Footer = new TextEncoder().encode('\nendstream\nendobj\n');
+
+      // Calculate offset for object 5
+      const obj5Offset = headerBytes.length + obj5HeaderBytes.length - 1; // approximate
+      offsets[5] = headerBytes.length;
+
+      // xref table
+      const xrefOffset = headerBytes.length + obj5HeaderBytes.length + imgLen + obj5Footer.length;
+      const xrefLines = ['xref', `0 6`, '0000000000 65535 f '];
+      for (let i = 1; i <= 5; i++) {
+        xrefLines.push(String(offsets[i] || 0).padStart(10, '0') + ' 00000 n ');
+      }
+      xrefLines.push('trailer');
+      xrefLines.push('<< /Size 6 /Root 1 0 R >>');
+      xrefLines.push('startxref');
+      xrefLines.push(String(xrefOffset));
+      xrefLines.push('%%EOF');
+      const xrefBytes = new TextEncoder().encode(xrefLines.join('\n'));
+
+      // Concatenate all parts
+      const totalLen = headerBytes.length + obj5HeaderBytes.length + imgLen + obj5Footer.length + xrefBytes.length;
+      const pdfArr = new Uint8Array(totalLen);
+      let pos = 0;
+      pdfArr.set(headerBytes, pos); pos += headerBytes.length;
+      pdfArr.set(obj5HeaderBytes, pos); pos += obj5HeaderBytes.length;
+      pdfArr.set(imgArr, pos); pos += imgLen;
+      pdfArr.set(obj5Footer, pos); pos += obj5Footer.length;
+      pdfArr.set(xrefBytes, pos);
+
+      const pdfBlob = new Blob([pdfArr], { type: 'application/pdf' });
+      const pdfUrl = URL.createObjectURL(pdfBlob);
+      const a = document.createElement('a');
+      a.href = pdfUrl;
+      a.download = `${selectedDiagram}-diagram.pdf`;
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(pdfUrl), 1000);
+      showToast('Diagram exported as PDF', 'success');
+    };
+    img.onerror = () => {
+      URL.revokeObjectURL(url);
+      showToast('PDF export failed — try PNG instead', 'error');
+    };
+    img.src = url;
+  };
+
+  /**
+   * handleDownloadCode()
+   * Downloads the currently generated code as a file with the correct extension.
+   */
+  const handleDownloadCode = () => {
+    if (!generatedFiles || generatedFiles.length === 0) {
+      showToast('No generated code to download — click "Generate Code" first', 'error');
+      return;
+    }
+    const extension = language === 'Python' ? 'py' : language === 'JavaScript' ? 'js' : 'java';
+    const mime = language === 'Python' ? 'text/x-python' : language === 'JavaScript' ? 'text/javascript' : 'text/x-java-source';
+
+    if (generatedFiles.length === 1) {
+      const file = generatedFiles[0];
+      const blob = new Blob([file.content], { type: mime });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = file.filename.includes('.') ? file.filename : `${file.filename}.${extension}`;
+      a.click();
+      URL.revokeObjectURL(url);
+      showToast(`Downloaded ${a.download}`, 'success');
+    } else {
+      // Multiple files — download each one
+      generatedFiles.forEach((file, idx) => {
+        setTimeout(() => {
+          const blob = new Blob([file.content], { type: mime });
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = file.filename.includes('.') ? file.filename : `${file.filename}.${extension}`;
+          a.click();
+          URL.revokeObjectURL(url);
+        }, idx * 300);
+      });
+      showToast(`Downloading ${generatedFiles.length} files…`, 'success');
+    }
+  };
+
+  /**
+   * handleClearCode()
+   * Clears the generated code panel.
+   */
+  const handleClearCode = () => {
+    setGeneratedFiles([]);
+    setGeneratedCode('');
+    setSelectedFileIndex(0);
+    setShowCodePanel(false);
+    showToast('Generated code cleared', 'success');
+  };
+
   const handleExport = () => {
     const data = JSON.stringify({ 
       elements, 
@@ -1220,8 +1439,13 @@ const UMLEditor = ({ currentUser, onLoginSuccess, onLogout }) => {
           onExport={handleExport}
           onExportSVG={handleExportSVG}
           onExportPNG={handleExportPNG}
+          onExportJPEG={handleExportJPEG}
+          onExportPDF={handleExportPDF}
           onGenerateCode={handleGenerateCode}
+          onDownloadCode={handleDownloadCode}
+          onClearCode={handleClearCode}
           onCodeToUML={handleCodeToUML}
+          hasGeneratedCode={generatedFiles && generatedFiles.length > 0}
           zoom={zoom}
           onZoomIn={handleZoomIn}
           onZoomOut={handleZoomOut}
@@ -1638,6 +1862,7 @@ const UMLEditor = ({ currentUser, onLoginSuccess, onLogout }) => {
                         strokeWidth={selectedElements.some(el => el.id === element.id) ? 2 : 1}
                         rx="4"
                       />
+                      {/* Colored header accent stripe */}
                       {element.stereotype && (
                         <text x={element.x + element.width / 2} y={element.y + 15} fill="#888888" fontSize="10" textAnchor="middle">
                           &lt;&lt;{element.stereotype}&gt;&gt;
