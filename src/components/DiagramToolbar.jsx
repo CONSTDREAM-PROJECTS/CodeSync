@@ -14,6 +14,8 @@
  * UPDATED FEATURES:
  * - Export sub-menu now includes PDF and JPEG diagram exports
  * - Generate Code button has a dropdown to download code as the specific file type
+ * - The Code Actions dropdown also offers "Download as .pdf" — a paginated,
+ *   print-ready PDF of the generated source (see UMLEditor.handleDownloadCodePDF)
  * - A "Clear Code" option is added to wipe the generated code panel
  * ============================================================
  */
@@ -33,6 +35,7 @@ const DiagramToolbar = ({
   onExportJPEG,
   onGenerateCode,
   onDownloadCode,
+  onDownloadCodePDF,
   onClearCode,
   onCodeToUML,
   zoom,
@@ -252,6 +255,14 @@ const DiagramToolbar = ({
               >
                 <Download size={13} />
                 Download as .{getCodeFileExtension()}
+              </button>
+              <button
+                onClick={() => { onDownloadCodePDF(); setShowGenerateMenu(false); }}
+                disabled={!hasGeneratedCode}
+                className={`px-3 py-2 text-xs text-left whitespace-nowrap flex items-center gap-2 ${hasGeneratedCode ? 'hover:bg-[#3e3e42] text-white' : 'text-gray-600 cursor-not-allowed'}`}
+                title={hasGeneratedCode ? 'Download generated code as a paginated PDF' : 'Generate code first'}
+              >
+                📑 Download as .pdf
               </button>
               <div className="border-t border-[#3e3e42] my-1" />
               <button

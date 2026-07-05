@@ -46,6 +46,80 @@
  *   name     — display label in DiagramSidebar
  *   category — 'Structural' or 'Behavioral' for sidebar grouping
  */
+// ─────────────────────────────────────────────────────────────
+// Default Element Placement & Sizing
+// ─────────────────────────────────────────────────────────────
+// Extracted from UMLEditor.addElement() so the exact same placement
+// formula used at runtime can also be exercised by capacity/clutter
+// tests (see src/utils/__tests__/diagramCapacity.test.js) without
+// duplicating the numbers in two places.
+
+/** Element types rendered as the larger "box" shape (class-like). */
+export const BOX_ELEMENT_TYPES = ['class', 'component', 'interface', 'abstract', 'enum'];
+
+export const DEFAULT_BOX_SIZE   = { width: 200, height: 150 };
+export const DEFAULT_OTHER_SIZE = { width: 150, height: 100 };
+
+/**
+ * getDefaultElementSize(type)
+ * Mirrors the width/height ternary inside UMLEditor.addElement().
+ */
+export const getDefaultElementSize = (type) =>
+  BOX_ELEMENT_TYPES.includes(type) ? { ...DEFAULT_BOX_SIZE } : { ...DEFAULT_OTHER_SIZE };
+
+/**
+ * getDefaultElementPosition(index)
+ * Mirrors `x: 100 + (elements.length * 20), y: 100 + (elements.length * 20)`
+ * from UMLEditor.addElement() — every new element cascades diagonally by
+ * 20px per existing element on the canvas.
+ */
+export const getDefaultElementPosition = (index) => ({
+  x: 100 + index * 20,
+  y: 100 + index * 20,
+});
+
+/**
+ * countOverlappingPairs(elements)
+ * LAYMAN'S: Counts how many pairs of UML boxes visually overlap each other —
+ *   a direct, measurable stand-in for "cluttering the Editor panel".
+ * TECHNICAL: Simple O(n²) axis-aligned bounding box (AABB) intersection test,
+ *   consistent with the hit-testing approach already used in
+ *   handleCanvasClick(). Fine for the element counts under test (≤ a few
+ *   hundred).
+ */
+export const countOverlappingPairs = (elements) => {
+  let overlaps = 0;
+  for (let i = 0; i < elements.length; i++) {
+    for (let j = i + 1; j < elements.length; j++) {
+      const a = elements[i];
+      const b = elements[j];
+      const aw = a.width ?? 150;
+      const ah = a.height ?? 100;
+      const bw = b.width ?? 150;
+      const bh = b.height ?? 100;
+      const overlapsX = a.x < b.x + bw && a.x + aw > b.x;
+      const overlapsY = a.y < b.y + bh && a.y + ah > b.y;
+      if (overlapsX && overlapsY) overlaps++;
+    }
+  }
+  return overlaps;
+};
+
+/**
+ * computeDiagramBounds(elements, padding = 60)
+ * Mirrors the full-bounds calculation used by handleExportPNG/JPEG/PDF in
+ * UMLEditor.jsx, so tests can check how large the diagram's total canvas
+ * area grows as more components are added.
+ */
+export const computeDiagramBounds = (elements, padding = 60) => {
+  if (!elements || elements.length === 0) return { width: 0, height: 0 };
+  const minX = Math.min(...elements.map((el) => el.x)) - padding;
+  const minY = Math.min(...elements.map((el) => el.y)) - padding;
+  const maxX = Math.max(...elements.map((el) => el.x + (el.width || 200))) + padding;
+  const maxY = Math.max(...elements.map((el) => el.y + (el.height || 150))) + padding;
+  return { width: maxX - minX, height: maxY - minY };
+};
+
 export const diagramTypes = [
   // ── Structural ──────────────────────────────────────────────
   { id: 'class',     name: 'Class Diagram',     category: 'Structural' },

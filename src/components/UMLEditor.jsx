@@ -63,7 +63,7 @@ import ValidationService from '../services/ValidationService';
 import DiagramService from '../services/diagramService';
 import { useHistory } from '../hooks/useHistory';
 import { useCanvasInteractions } from '../hooks/useCanvasInteractions';
-import { diagramTypes, getToolbarItems } from '../utils/diagramUtils';
+import { diagramTypes, getToolbarItems, getDefaultElementPosition, getDefaultElementSize } from '../utils/diagramUtils';
 import DiagramSidebar from './DiagramSidebar';
 import DiagramToolbar from './DiagramToolbar';
 import ToolPalette from './ToolPalette';
@@ -506,14 +506,16 @@ const UMLEditor = ({ currentUser, onLoginSuccess, onLogout }) => {
       return;
     }
 
+    const { x, y } = getDefaultElementPosition(elements.length);
+    const { width, height } = getDefaultElementSize(type);
     const newElement = {
       id: nextId(),
       type,
       diagramType: selectedDiagram,
-      x: 100 + (elements.length * 20),
-      y: 100 + (elements.length * 20),
-      width: type === 'class' || type === 'component' || type === 'interface' || type === 'abstract' || type === 'enum' ? 200 : 150,
-      height: type === 'class' || type === 'component' || type === 'interface' || type === 'abstract' || type === 'enum' ? 150 : 100,
+      x,
+      y,
+      width,
+      height,
       name: `New${type.charAt(0).toUpperCase() + type.slice(1)}`,
       // enum gets attributes (used as enum value list), no methods
       attributes: (type === 'class' || type === 'abstract' || type === 'enum') ? [] : undefined,
@@ -1376,6 +1378,158 @@ const UMLEditor = ({ currentUser, onLoginSuccess, onLogout }) => {
   };
 
   /**
+   * buildCodePdfBytes(files)
+   * LAYMAN'S: Turns the generated source file(s) into a real, paginated PDF —
+   *   each file starts on its own page, with its filename as a header and its
+   *   code laid out in a monospaced font, wrapped and paginated to fit
+   *   US-Letter pages.
+   * TECHNICAL: Hand-builds a minimal PDF (no external library, consistent
+   *   with handleExportPDF's manual byte construction below). Uses the
+   *   standard, non-embedded "Courier" Type1 font so no font program needs
+   *   to be embedded. One shared Font object (3 0 obj) is referenced by
+   *   every page's /Resources. Each page gets its own Page object and its
+   *   own Contents stream object; offsets are computed as the PDF text is
+   *   assembled so the xref table stays accurate.
+   */
+  const buildCodePdfBytes = (files) => {
+    const PAGE_W = 612;   // US Letter, points (72 dpi)
+    const PAGE_H = 792;
+    const MARGIN = 40;
+    const FONT_SIZE = 9;
+    const LEADING = 12;
+    const CHAR_W = FONT_SIZE * 0.6; // Courier is fixed-width: ~0.6em per char
+    const maxChars = Math.floor((PAGE_W - MARGIN * 2) / CHAR_W);
+    const maxLinesPerPage = Math.floor((PAGE_H - MARGIN * 2) / LEADING);
+
+    const escapePdfText = (str) =>
+      str
+        .replace(/[^\x20-\x7E]/g, (ch) => (ch === '\t' ? '  ' : '?')) // non-ASCII/tab-safe
+        .replace(/\\/g, '\\\\')
+        .replace(/\(/g, '\\(')
+        .replace(/\)/g, '\\)');
+
+    const wrapLine = (line) => {
+      if (line.length === 0) return [''];
+      const chunks = [];
+      for (let i = 0; i < line.length; i += maxChars) {
+        chunks.push(line.slice(i, i + maxChars));
+      }
+      return chunks;
+    };
+
+    // Build the full flat list of pages, where each page is an array of
+    // already-wrapped, already-escaped text lines. Every file starts fresh
+    // on a new page so files never bleed into each other.
+    const pages = [];
+    files.forEach((file) => {
+      const headerLines = [`FILE: ${file.filename}`, '─'.repeat(Math.min(maxChars, 60)), ''];
+      const bodyLines = String(file.content || '').split('\n').flatMap(wrapLine);
+      const allLines = [...headerLines, ...bodyLines].map(escapePdfText);
+
+      for (let i = 0; i < allLines.length; i += maxLinesPerPage) {
+        pages.push(allLines.slice(i, i + maxLinesPerPage));
+      }
+      if (allLines.length === 0) pages.push(['']);
+    });
+    if (pages.length === 0) pages.push(['(no content)']);
+
+    const numPages = pages.length;
+    const pageObjId = (i) => 4 + i;
+    const contentObjId = (i) => 4 + numPages + i;
+    const totalObjs = 3 + numPages * 2; // catalog, pages, font, + page/content per page
+
+    const parts = [];
+    const offsets = {};
+    let cursor = 0;
+    const push = (str) => {
+      const chunk = str + '\n';
+      parts.push(chunk);
+      cursor += chunk.length;
+    };
+    const setObjOffset = (id) => { offsets[id] = cursor; };
+
+    push('%PDF-1.4');
+
+    setObjOffset(1);
+    push('1 0 obj');
+    push('<< /Type /Catalog /Pages 2 0 R >>');
+    push('endobj');
+
+    setObjOffset(2);
+    const kids = pages.map((_, i) => `${pageObjId(i)} 0 R`).join(' ');
+    push('2 0 obj');
+    push(`<< /Type /Pages /Kids [${kids}] /Count ${numPages} >>`);
+    push('endobj');
+
+    setObjOffset(3);
+    push('3 0 obj');
+    push('<< /Type /Font /Subtype /Type1 /BaseFont /Courier >>');
+    push('endobj');
+
+    pages.forEach((lines, i) => {
+      setObjOffset(pageObjId(i));
+      push(`${pageObjId(i)} 0 obj`);
+      push(`<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${PAGE_W} ${PAGE_H}] /Resources << /Font << /F1 3 0 R >> >> /Contents ${contentObjId(i)} 0 R >>`);
+      push('endobj');
+
+      const streamBody = [
+        `BT /F1 ${FONT_SIZE} Tf ${LEADING} TL ${MARGIN} ${PAGE_H - MARGIN} Td`,
+        ...lines.map((l) => `(${l}) Tj T*`),
+        'ET',
+      ].join('\n');
+
+      setObjOffset(contentObjId(i));
+      push(`${contentObjId(i)} 0 obj`);
+      push(`<< /Length ${streamBody.length} >>`);
+      push('stream');
+      push(streamBody);
+      push('endstream');
+      push('endobj');
+    });
+
+    const xrefOffset = cursor;
+    const xrefLines = ['xref', `0 ${totalObjs + 1}`, '0000000000 65535 f '];
+    for (let id = 1; id <= totalObjs; id++) {
+      xrefLines.push(String(offsets[id] || 0).padStart(10, '0') + ' 00000 n ');
+    }
+    push(xrefLines.join('\n'));
+    push('trailer');
+    push(`<< /Size ${totalObjs + 1} /Root 1 0 R >>`);
+    push('startxref');
+    push(String(xrefOffset));
+    push('%%EOF');
+
+    return new TextEncoder().encode(parts.join(''));
+  };
+
+  /**
+   * handleDownloadCodePDF()
+   * LAYMAN'S: Saves the currently generated code as a PDF file instead of a
+   *   raw .java/.py/.js file — useful for printing or sharing a read-only,
+   *   nicely paginated copy of the generated source.
+   */
+  const handleDownloadCodePDF = () => {
+    if (!generatedFiles || generatedFiles.length === 0) {
+      showToast('No generated code to download — click "Generate Code" first', 'error');
+      return;
+    }
+    try {
+      const pdfBytes = buildCodePdfBytes(generatedFiles);
+      const blob = new Blob([pdfBytes], { type: 'application/pdf' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${selectedDiagram}-generated-code.pdf`;
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      showToast('Generated code exported as PDF', 'success');
+    } catch (err) {
+      console.error('[handleDownloadCodePDF]', err);
+      showToast('Code PDF export failed', 'error');
+    }
+  };
+
+  /**
    * handleClearCode()
    * Clears the generated code panel.
    */
@@ -1499,6 +1653,7 @@ const UMLEditor = ({ currentUser, onLoginSuccess, onLogout }) => {
           onExportPDF={handleExportPDF}
           onGenerateCode={handleGenerateCode}
           onDownloadCode={handleDownloadCode}
+          onDownloadCodePDF={handleDownloadCodePDF}
           onClearCode={handleClearCode}
           onCodeToUML={handleCodeToUML}
           hasGeneratedCode={generatedFiles && generatedFiles.length > 0}
