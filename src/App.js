@@ -16,7 +16,12 @@ import './App.css';
 //   https://yoursite.com/reset-password?token=abc
 // ─────────────────────────────────────────────────────────────
 const _initialParams = new URLSearchParams(window.location.search);
-const _initialToken  = _initialParams.get('token') || null;
+const _isOAuthCallback = window.location.pathname === '/oauth-callback';
+// OAuth callbacks also use a `token` query parameter. Leave it untouched so
+// OAuthCallback can persist it and notify the main application window.
+const _initialToken = _isOAuthCallback
+  ? null
+  : (_initialParams.get('token') || null);
 
 // Immediately clean the token from the address bar so a hard
 // refresh after a successful reset doesn't re-open the modal.
