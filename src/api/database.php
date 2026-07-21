@@ -6,16 +6,18 @@
 //   1. hPanel → Hosting → MySQL Databases → create a database
 //   2. Note the hostname (usually 'localhost' on Hostinger),
 //      database name, username, and password
-//   3. Fill in the four DB_* constants below
+//   3. Set DB_HOST, DB_PORT, DB_NAME, DB_USER, and DB_PASS in the
+//      deployment environment. The same-account Hostinger defaults below
+//      are used when an environment value is not present.
 // ============================================================
 
-// BUG 7 FIX: Was still pointing to InfinityFree credentials.
-// Updated for Hostinger. DB_HOST is almost always 'localhost' on
-// Hostinger shared hosting (same-server connection).
-define('DB_HOST', '10.0.1.204');                  // Hostinger: usually localhost
-define('DB_NAME', 'Codesynch_db');      // ← your Hostinger DB name
-define('DB_USER', 'codesynch_user');      // ← your Hostinger DB user
-define('DB_PASS', '#Code_no7_#');    // ← your Hostinger DB password
+// Hostinger uses localhost for a database on the same hosting account.
+// Environment variables take precedence for other deployment topologies.
+define('DB_HOST', getenv('DB_HOST') ?: 'localhost');
+define('DB_PORT', getenv('DB_PORT') ?: '3306');
+define('DB_NAME', getenv('DB_NAME') ?: 'Codesynch_db');
+define('DB_USER', getenv('DB_USER') ?: 'codesynch_user');
+define('DB_PASS', getenv('DB_PASS') ?: '#Code_no7_#');
 
 // JWT signing secret — must be long and random.
 // IMPORTANT: Changing this after users have registered will
@@ -27,6 +29,7 @@ function getPDO(): PDO {
     if ($pdo !== null) return $pdo;
 
     $dsn = 'mysql:host=' . DB_HOST
+         . ';port=' . DB_PORT
          . ';dbname=' . DB_NAME
          . ';charset=utf8mb4';
 
