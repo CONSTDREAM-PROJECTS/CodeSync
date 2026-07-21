@@ -46,7 +46,13 @@ function getPDO(): PDO {
         header('Content-Type: application/json');
         // BUG 7 FIX: Never expose the raw exception message — it can
         // contain DB credentials. Log server-side only.
-        error_log('[CodeSynch] DB connection failed: ' . $e->getMessage());
+        error_log(sprintf(
+            '[CodeSynch] DB connection failed (host=%s port=%s database=%s): %s',
+            DB_HOST,
+            DB_PORT,
+            DB_NAME,
+            $e->getMessage()
+        ));
         echo json_encode(['error' => 'Database connection failed. Contact the administrator.']);
         exit;
     }
