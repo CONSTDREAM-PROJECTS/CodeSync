@@ -41,7 +41,7 @@ import {
   Loader, Github, Chrome, Check, X,
   User, Lock, Eye, EyeOff, LogIn, UserPlus, ArrowLeft,
 } from 'lucide-react';
-import { TOKEN_KEY } from '../services/diagramService';
+import { OAUTH_ERROR_KEY, TOKEN_KEY } from '../services/diagramService';
 export { TOKEN_KEY };
 
 // ─────────────────────────────────────────────────────────────
@@ -144,27 +144,32 @@ const LoginModal = ({ onClose, onLoginSuccess, forceShow = false }) => {
 
   // ── OAuth postMessage listener ────────────────────────────
   useEffect(() => {
+    const completeOAuthLogin = (token, user) => {
+      try {
+        const parts   = token.split('.');
+        const payload = JSON.parse(atob(parts[1].replace(/-/g, '+').replace(/_/g, '/')));
+        const resolvedUser = {
+          uid:      String(payload.sub),
+          email:    payload.email    || user?.email    || '',
+          username: payload.username || user?.username || '',
+        };
+        localStorage.setItem(TOKEN_KEY, token);
+        localStorage.removeItem(OAUTH_ERROR_KEY);
+        setOauthLoading('');
+        onLoginSuccess?.(resolvedUser);
+        onClose();
+      } catch {
+        setError('OAuth login succeeded but token was malformed. Please try again.');
+        setOauthLoading('');
+      }
+    };
+
     const handleMessage = (event) => {
       if (event.origin !== window.location.origin) return;
       const { type, token, user, error: oauthError } = event.data || {};
 
       if (type === 'OAUTH_SUCCESS' && token) {
-        try {
-          const parts   = token.split('.');
-          const payload = JSON.parse(atob(parts[1].replace(/-/g, '+').replace(/_/g, '/')));
-          const resolvedUser = {
-            uid:      String(payload.sub),
-            email:    payload.email    || user?.email    || '',
-            username: payload.username || user?.username || '',
-          };
-          localStorage.setItem(TOKEN_KEY, token);
-          setOauthLoading('');
-          onLoginSuccess?.(resolvedUser);
-          onClose();
-        } catch {
-          setError('OAuth login succeeded but token was malformed. Please try again.');
-          setOauthLoading('');
-        }
+        completeOAuthLogin(token, user);
       }
 
       if (type === 'OAUTH_ERROR') {
@@ -173,8 +178,22 @@ const LoginModal = ({ onClose, onLoginSuccess, forceShow = false }) => {
       }
     };
 
+    const handleStorage = (event) => {
+      if (event.key === TOKEN_KEY && event.newValue) {
+        completeOAuthLogin(event.newValue);
+      }
+      if (event.key === OAUTH_ERROR_KEY && event.newValue) {
+        setError(event.newValue);
+        setOauthLoading('');
+      }
+    };
+
     window.addEventListener('message', handleMessage);
-    return () => window.removeEventListener('message', handleMessage);
+    window.addEventListener('storage', handleStorage);
+    return () => {
+      window.removeEventListener('message', handleMessage);
+      window.removeEventListener('storage', handleStorage);
+    };
   }, [onLoginSuccess, onClose]);
 
   // ── Popup close watcher ───────────────────────────────────
@@ -182,13 +201,22 @@ const LoginModal = ({ onClose, onLoginSuccess, forceShow = false }) => {
     if (!oauthLoading) return;
     const interval = setInterval(() => {
       if (popupRef.current?.closed) {
+        const user = restoreSession();
+        const oauthError = localStorage.getItem(OAUTH_ERROR_KEY);
         setOauthLoading('');
-        setError('Sign-in popup was closed. Please try again.');
+        if (user) {
+          localStorage.removeItem(OAUTH_ERROR_KEY);
+          onLoginSuccess?.(user);
+          onClose();
+        } else {
+          setError(oauthError || 'Sign-in popup was closed. Please try again.');
+          localStorage.removeItem(OAUTH_ERROR_KEY);
+        }
         clearInterval(interval);
       }
     }, 500);
     return () => clearInterval(interval);
-  }, [oauthLoading]);
+  }, [oauthLoading, onLoginSuccess, onClose]);
 
   // ── Shared POST helper ────────────────────────────────────
   const _post = async (endpoint, body) => {
@@ -326,6 +354,7 @@ const LoginModal = ({ onClose, onLoginSuccess, forceShow = false }) => {
   // ── OAuth opener ──────────────────────────────────────────
   const handleOAuth = (provider) => {
     setError('');
+    localStorage.removeItem(OAUTH_ERROR_KEY);
     setOauthLoading(provider);
 
     const width  = 520;
