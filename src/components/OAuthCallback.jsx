@@ -1,4 +1,5 @@
 import { useEffect } from 'react';
+import { OAUTH_ERROR_KEY, TOKEN_KEY } from '../services/diagramService';
 
 /**
  * OAuthCallback
@@ -16,7 +17,17 @@ const OAuthCallback = () => {
     const token  = params.get('token');
     const error  = params.get('error');
 
-    if (window.opener) {
+    // OAuth providers can sever window.opener via Cross-Origin-Opener-Policy.
+    // Persist the result first because localStorage is shared by same-origin
+    // windows even when the opener reference is no longer available.
+    if (token) {
+      localStorage.setItem(TOKEN_KEY, token);
+      localStorage.removeItem(OAUTH_ERROR_KEY);
+    } else if (error) {
+      localStorage.setItem(OAUTH_ERROR_KEY, error);
+    }
+
+    if (window.opener && !window.opener.closed) {
       if (token) {
         window.opener.postMessage(
           { type: 'OAUTH_SUCCESS', token },
@@ -33,10 +44,11 @@ const OAuthCallback = () => {
           window.location.origin
         );
       }
-      window.close();
+      setTimeout(() => window.close(), 50);
     } else {
       // Opened directly, not as a popup — redirect home
-      window.location.href = '/';
+      window.close();
+      setTimeout(() => window.location.replace('/'), 100);
     }
   }, []);
 
