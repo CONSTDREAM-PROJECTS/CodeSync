@@ -43,6 +43,7 @@
  */
 
 export const TOKEN_KEY = 'codesynch_token';
+export const OAUTH_ERROR_KEY = 'codesynch_oauth_error';
 
 // ─────────────────────────────────────────────────────────────
 // Configuration — keep in sync with LoginModal.jsx API_BASE_URL
